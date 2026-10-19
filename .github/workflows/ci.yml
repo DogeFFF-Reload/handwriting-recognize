@@ -6,7 +6,7 @@ name: ci
 
 on:
   push:
-    branches: ["p2/**", "p3/**", "p4/**"]
+    branches: ["p2/**", "p3/**", "p4/**", "demo/**"]
   workflow_dispatch:
 
 jobs:
