@@ -1,0 +1,33 @@
+# 只有一台 Mac 能编译，所以 P2/P3/P4 的分支在云端先过一遍：
+# - unit：Linux 上跑 InkCore 的单元测试（便宜、快）
+# - ios-build：macOS 上用 xcodebuild 把整个 App 编成 iOS 模拟器版（不签名）。
+#   macOS 分钟数按 10 倍计费，只在 commit 信息带 [mac] 或手动触发时跑。
+name: ci
+
+on:
+  push:
+    branches: ["p2/**", "p3/**", "p4/**"]
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    container: swift:6.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: InkCore tests
+        run: swift test --package-path Packages/InkCore
+
+  ios-build:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[mac]')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version && xcrun simctl list runtimes | head -20
+      - name: Build app for iOS Simulator
+        run: |
+          set -o pipefail
+          xcodebuild -project app/InkTutor.xcodeproj -scheme InkTutor \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -80
