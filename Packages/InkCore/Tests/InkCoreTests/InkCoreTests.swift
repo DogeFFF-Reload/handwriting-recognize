@@ -301,3 +301,51 @@ final class ExplanationTests: XCTestCase {
         XCTAssertThrowsError(try extractLatex(fromModelReply: "sorry"))
     }
 }
+
+final class DerivativeCheckTests: XCTestCase {
+    func testGoldenWrongLine() throws {
+        let r = try XCTUnwrap(DerivativeCheck.check(functionLatex: "f(x)=x^3-3x", derivativeLatex: "f'(x)=3x^2-3x"))
+        XCTAssertFalse(r.ok)
+        XCTAssertEqual(r.findings.count, 1)
+        XCTAssertEqual(r.findings[0].termIndex, 1)
+        XCTAssertEqual(r.findings[0].kind, "not_differentiated")
+        XCTAssertEqual(r.findings[0].wrongLatex, "-3x")
+        XCTAssertEqual(r.findings[0].expectedLatex, "-3")
+        XCTAssertEqual(r.explanation, "x 求导得 1，所以 −3x 求导后是 −3。")
+        XCTAssertEqual(DerivativeCheck.expectedTermCount(functionLatex: "f(x)=x^3-3x"), 2)
+    }
+
+    func testGoldenFixedLineAndOrderFree() throws {
+        XCTAssertEqual(DerivativeCheck.check(functionLatex: "f(x)=x^{3}-3x", derivativeLatex: "f^{\prime}(x)=3x^{2}-3")?.ok, true)
+        XCTAssertEqual(DerivativeCheck.check(functionLatex: "f(x)=x^3-3x", derivativeLatex: "f'(x)=-3+3x^2")?.ok, true)
+    }
+
+    func testOtherMistakes() throws {
+        let a = try XCTUnwrap(DerivativeCheck.check(functionLatex: "f(x)=x^3-3x", derivativeLatex: "f'(x)=x^2-3"))
+        XCTAssertEqual([a.findings[0].kind, a.findings[0].expectedLatex], ["wrong_coef", "3x^2"])
+        let b = try XCTUnwrap(DerivativeCheck.check(functionLatex: "f(x)=x^2+5", derivativeLatex: "f'(x)=2x+5"))
+        XCTAssertEqual([b.findings[0].kind, b.findings[0].expectedLatex], ["not_differentiated", "0"])
+        XCTAssertEqual(b.explanation, "常数求导得 0，所以 5 求导后是 0。")
+        let c = try XCTUnwrap(DerivativeCheck.check(functionLatex: "f(x)=x^3-3x+5", derivativeLatex: "f'(x)=3x^2"))
+        XCTAssertEqual([c.findings[0].kind, c.findings[0].expectedLatex], ["missing_term", "-3"])
+        XCTAssertNil(DerivativeCheck.check(functionLatex: "f(x)=x^3-3x", derivativeLatex: "\int x"))
+    }
+
+    func testAnnotationCirclesTheWrongTermStrokes() throws {
+        let rows: [(String, CGFloat, CGFloat, CGFloat, CGFloat)] = [
+            ("f", 10, 100, 20, 60), ("(", 40, 100, 10, 50), ("x1", 52, 115, 18, 30), (")", 72, 100, 10, 50),
+            ("=a", 90, 120, 26, 2), ("=b", 90, 132, 26, 2), ("3", 125, 105, 22, 40), ("x2", 150, 115, 22, 30),
+            ("2", 175, 95, 12, 18), ("-", 196, 126, 20, 2), ("3b", 222, 105, 22, 40), ("x3", 248, 115, 22, 30),
+        ]
+        let strokes = rows.map { InkStroke(id: $0.0, bounds: CGRect(x: $0.1, y: $0.2, width: $0.3, height: $0.4), createdAt: Date()) }
+        let line = InkLine(id: "L2", revision: 7, mode: .derivative, band: CGRect(x: 10, y: 95, width: 260, height: 65),
+                           strokes: strokes, removedStrokeIDs: [])
+        let a = try XCTUnwrap(DerivativeCheck.annotation(line: line, functionLatex: "f(x)=x^3-3x", derivativeLatex: "f'(x)=3x^2-3x"))
+        XCTAssertEqual(a.revision, 7)
+        XCTAssertEqual(a.errors.first?.bbox, [196, 105, 270, 145])
+        XCTAssertEqual(a.errors.first?.expectedLatex, "-3")
+        let s = try XCTUnwrap(DerivativeCheck.annotation(line: line, functionLatex: "f(x)=x^3-3x", derivativeLatex: "f'(x)=3x^2-3x", mode: .socratic))
+        XCTAssertNil(s.errors.first?.expectedLatex)
+        XCTAssertNil(s.explanation)
+    }
+}
