@@ -316,7 +316,7 @@ final class DerivativeCheckTests: XCTestCase {
     }
 
     func testGoldenFixedLineAndOrderFree() throws {
-        XCTAssertEqual(DerivativeCheck.check(functionLatex: "f(x)=x^{3}-3x", derivativeLatex: "f^{\prime}(x)=3x^{2}-3")?.ok, true)
+        XCTAssertEqual(DerivativeCheck.check(functionLatex: "f(x)=x^{3}-3x", derivativeLatex: "f^{\\prime}(x)=3x^{2}-3")?.ok, true)
         XCTAssertEqual(DerivativeCheck.check(functionLatex: "f(x)=x^3-3x", derivativeLatex: "f'(x)=-3+3x^2")?.ok, true)
     }
 
@@ -328,7 +328,7 @@ final class DerivativeCheckTests: XCTestCase {
         XCTAssertEqual(b.explanation, "常数求导得 0，所以 5 求导后是 0。")
         let c = try XCTUnwrap(DerivativeCheck.check(functionLatex: "f(x)=x^3-3x+5", derivativeLatex: "f'(x)=3x^2"))
         XCTAssertEqual([c.findings[0].kind, c.findings[0].expectedLatex], ["missing_term", "-3"])
-        XCTAssertNil(DerivativeCheck.check(functionLatex: "f(x)=x^3-3x", derivativeLatex: "\int x"))
+        XCTAssertNil(DerivativeCheck.check(functionLatex: "f(x)=x^3-3x", derivativeLatex: "\\int x"))
     }
 
     func testAnnotationCirclesTheWrongTermStrokes() throws {
