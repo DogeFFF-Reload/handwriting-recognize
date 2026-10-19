@@ -23,28 +23,35 @@ public struct GeometryView: View {
                 draw(ctx: &ctx, pos: pos, t: t)
             }
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { g in
-                        if fit == nil { fit = t }   // 拖动期间锁住缩放，避免图跟着跳
-                        let inv = t.inverted()
-                        if dragging == nil {
-                            dragging = scene.points
-                                .filter { $0.role == "free" }
-                                .map { ($0.id, pos[$0.id]!.applying(t)) }
-                                .filter { hypot($0.1.x - g.startLocation.x, $0.1.y - g.startLocation.y) < 32 }
-                                .min { hypot($0.1.x - g.startLocation.x, $0.1.y - g.startLocation.y) < hypot($1.1.x - g.startLocation.x, $1.1.y - g.startLocation.y) }?.0
-                        }
-                        if let id = dragging { model.freePoints[id] = g.location.applying(inv) }
-                    }
-                    .onEnded { _ in dragging = nil }
-            )
+            .gesture(dragGesture(pos: pos, t: t))
             .overlay(alignment: .topLeading) { caption(pos: pos) }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.25)))
         .accessibilityLabel("动态几何：拖动 A、B、C")
+    }
+
+    private func dragGesture(pos: [String: CGPoint], t: CGAffineTransform) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { g in
+                if fit == nil { fit = t }   // 拖动期间锁住缩放，避免图跟着跳
+                if dragging == nil { dragging = nearestFreePoint(to: g.startLocation, pos: pos, t: t) }
+                if let id = dragging { model.freePoints[id] = g.location.applying(t.inverted()) }
+            }
+            .onEnded { _ in dragging = nil }
+    }
+
+    /// 手指 32pt 以内最近的自由点。
+    private func nearestFreePoint(to p: CGPoint, pos: [String: CGPoint], t: CGAffineTransform) -> String? {
+        var best: String?
+        var bestD: CGFloat = 32
+        for pt in scene.points where pt.role == "free" {
+            guard let q = pos[pt.id]?.applying(t) else { continue }
+            let d = hypot(q.x - p.x, q.y - p.y)
+            if d < bestD { bestD = d; best = pt.id }
+        }
+        return best
     }
 
     private var medianIDs: [String] { scene.objects.filter { $0.id.hasPrefix("median") }.map(\.id) }
