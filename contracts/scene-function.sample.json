@@ -1,0 +1,53 @@
+{
+  "kind": "function",
+  "lines": [
+    {
+      "id": "L1",
+      "latex": "f(x)=x^3-3x",
+      "bbox": [
+        40,
+        120,
+        420,
+        180
+      ]
+    }
+  ],
+  "function": {
+    "terms": [
+      {
+        "coef": 1,
+        "pow": 3
+      },
+      {
+        "coef": -3,
+        "pow": 1
+      }
+    ],
+    "params": [
+      {
+        "name": "a",
+        "value": 1,
+        "min": -3,
+        "max": 3
+      },
+      {
+        "name": "b",
+        "value": 3,
+        "min": -5,
+        "max": 5
+      }
+    ],
+    "marks": [
+      {
+        "type": "extremum",
+        "x": -1,
+        "y": 2
+      },
+      {
+        "type": "extremum",
+        "x": 1,
+        "y": -2
+      }
+    ]
+  }
+}

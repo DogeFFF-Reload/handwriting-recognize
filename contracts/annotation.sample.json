@@ -1,0 +1,21 @@
+{
+  "line_id": "L2",
+  "revision": 3,
+  "ok": false,
+  "feedback_mode": "direct",
+  "errors": [
+    {
+      "kind": "wrong_term",
+      "wrong_latex": "-3x",
+      "expected_latex": "-3",
+      "bbox": [
+        318,
+        336,
+        372,
+        380
+      ]
+    }
+  ],
+  "explanation": "x 求导得 1 ，所以 −3x 求导后是 −3 。",
+  "hint_url": "/hint/7f3a"
+}

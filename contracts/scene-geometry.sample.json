@@ -1,0 +1,73 @@
+{
+  "kind": "geometry",
+  "points": [
+    {
+      "id": "A",
+      "role": "free",
+      "x": 180,
+      "y": 80
+    },
+    {
+      "id": "B",
+      "role": "free",
+      "x": 40,
+      "y": 280
+    },
+    {
+      "id": "C",
+      "role": "free",
+      "x": 320,
+      "y": 280
+    },
+    {
+      "id": "M",
+      "role": "constrained",
+      "x": 180,
+      "y": 280
+    }
+  ],
+  "objects": [
+    {
+      "type": "segment",
+      "id": "AB",
+      "points": [
+        "A",
+        "B"
+      ]
+    },
+    {
+      "type": "segment",
+      "id": "BC",
+      "points": [
+        "B",
+        "C"
+      ]
+    },
+    {
+      "type": "segment",
+      "id": "CA",
+      "points": [
+        "C",
+        "A"
+      ]
+    },
+    {
+      "type": "segment",
+      "id": "median",
+      "points": [
+        "A",
+        "M"
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "type": "midpoint",
+      "of": [
+        "B",
+        "C"
+      ],
+      "point": "M"
+    }
+  ]
+}

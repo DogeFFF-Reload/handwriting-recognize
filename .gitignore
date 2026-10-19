@@ -1,0 +1,9 @@
+MyCertificate.c
+**/MyScriptCertificate/
+.env
+*.mobileprovision
+xcuserdata/
+DerivedData/
+build/
+.DS_Store
+*.xcuserstate

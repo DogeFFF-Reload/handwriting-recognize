@@ -1,0 +1,34 @@
+{
+  "mode": "derivative",
+  "line_id": "L2",
+  "revision": 3,
+  "trigger": "auto_check",
+  "region": {
+    "x": 40,
+    "y": 320,
+    "w": 600,
+    "h": 140,
+    "scale": 2
+  },
+  "latex": "f'(x)=3x^2-3x",
+  "strokes": [
+    {
+      "id": "s17",
+      "points": [
+        [
+          318.0,
+          350.0,
+          1.2,
+          0.62
+        ]
+      ]
+    }
+  ],
+  "removed_stroke_ids": [
+    "s12",
+    "s13"
+  ],
+  "context": {
+    "function_latex": "x^3-3x"
+  }
+}
