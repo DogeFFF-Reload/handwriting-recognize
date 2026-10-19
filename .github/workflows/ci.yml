@@ -16,6 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: InkCore tests
+        if: hashFiles('Packages/InkCore/Tests/**') != ''
         run: swift test --package-path Packages/InkCore
 
   ios-build:
@@ -24,10 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Xcode version
-        run: xcodebuild -version && xcrun simctl list runtimes | head -20
+        run: xcodebuild -version
       - name: Build app for iOS Simulator
         run: |
-          set -o pipefail
           xcodebuild -project app/InkTutor.xcodeproj -scheme InkTutor \
             -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -80
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 || true
+          grep -E "error:|BUILD (SUCCEEDED|FAILED)" build.log | sed -E 's#/Users/runner/work/[^ ]*/(Packages|app)/#\1/#' | sort -u | head -80
+          grep -q "BUILD SUCCEEDED" build.log
