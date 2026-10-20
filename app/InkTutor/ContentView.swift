@@ -91,7 +91,8 @@ struct SettingsView: View {
                         Text("回放（断网）").tag("replay")
                     }
                 } footer: {
-                    Text("自动：MyScript 就绪就用它（设备上识别，不联网），认不出时再试百炼和 Server；都没有就回放。"
+                    Text("自动：MyScript 就绪就用它（设备上识别），认不出时再试百炼和 Server；都没有就回放。"
+                         + "指定的引擎没配好（例如选了百炼却没填 Key）时也按这个顺序。"
                          + "回放不看笔迹内容：第一条函数先当作 x^3-5x，改过笔迹之后当作 x^3-3x；推导行先当作 3x^2-3x，改过之后当作 3x^2-3。")
                 }
                 Section {

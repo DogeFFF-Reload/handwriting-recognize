@@ -5,7 +5,10 @@ import PencilKit
 import libiink
 #endif
 
-/// MyScript iink 的 Math Recognizer（设备上，不联网，几百毫秒）：把一段笔迹的点原样送进去，取 LaTeX。
+/// MyScript iink 的 Math Recognizer（识别在设备上做，几百毫秒）：把一段笔迹的点原样送进去，取 LaTeX。
+///
+/// 注意：建 Engine 时 iink 会联网到 license.myscript.com 查一次授权。证书在授权后台没启用、或 Bundle ID 对不上，
+/// 都只报 "invalid certificate"；没网时的表现还没实测。MyScript 不可用时 App 按识别链退回其他引擎。
 ///
 /// 要三样东西，缺一样就报出是哪一样，App 退回其他识别引擎：
 /// 1. iink SDK（Swift 包 MyScript/interactive-ink-packages-ios，工程里已经加好）；

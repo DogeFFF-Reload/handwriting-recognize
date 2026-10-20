@@ -35,5 +35,7 @@ P2、P3、P4 把源码推到自己的分支。`main` 只表示这一版已经在
 - 证书：MyScript 开发者后台发的 `MyCertificate.c` 复制到 `app/InkTutor/MyScriptCertificate/MyCertificate.c`。这个目录在 `.gitignore` 里，Xcode 的文件夹同步会把它编进 App。没放证书也能编译运行（`MyScript/CertificateFallback.c` 是空证书的弱定义），函数识别退回其他引擎，设置页写明缺什么。
 - 数学识别资源（math2，约 14 MB）不进仓库：Mac 上第一次编译时「MyScript Recognition Assets」这一步自动下载到 `app/MyScript/`，也可以手动跑 `tools/myscript/fetch-assets.sh`。这份资源是 MyScript 给示例程序用的。
 - Bundle ID 要和证书对得上，否则设置页显示「证书无效」。
+- **证书在授权后台要启用**：license.myscript.com › Applications › InkTutor，证书 `dev.handwriting.inktutor` 那一行的 Enabled 开关是绿的才行（2026-10-20 我们这张建好后是关着的；关着时 iink 只报 "invalid certificate"，和 Bundle ID 对不上时一样）。
+- 识别在设备上做，但 iink 每次启动会联网到 license.myscript.com 查一次授权：演示现场要有网。没网时 iink 会怎样还没实测，App 的识别链会退回百炼 / Server / 回放。
 
 模拟器编译由 CI 验证（`ios-build`，commit 信息带 `[mac]` 或手动触发）。真机上的 Pencil 双击、悬停落点、整笔擦除、MyScript 实际识别效果还要在那台 iPad 上看，结果写进 [docs/device.md](docs/device.md)。这一版还没装到 iPad 上，所以没有推到远端 `main`。

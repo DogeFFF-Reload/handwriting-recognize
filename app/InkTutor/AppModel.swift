@@ -598,6 +598,8 @@ final class AppModel {
         case "replay": chain = []
         default: chain = [myscript, qwen, mac].compactMap { $0 }
         }
+        // 指定的引擎没配好（比如选了直连百炼却没填 Key）：按自动的顺序来，不直接退到回放
+        if chain.isEmpty, pref != "replay" { chain = [myscript, qwen, mac].compactMap { $0 } }
         guard !chain.isEmpty else {
             return ReplayRecognizer(script: ReplayScript.golden.overlaid(with: replayRecorder.script), tracker: replayTracker,
                                     wholeLine: true)
@@ -612,11 +614,12 @@ final class AppModel {
         let hasKey = !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasServer = URL(string: server.trimmingCharacters(in: .whitespacesAndNewlines))?.host != nil
         let ms = MyScriptMath.shared.status.isReady
+        // 和 makeRecognizer 一样：指定的引擎没配好时按自动的顺序
         switch pref {
-        case "myscript": return ms ? "MyScript" : "回放"
-        case "direct": return hasKey ? "百炼" : "回放"
-        case "server": return hasServer ? "Server" : "回放"
         case "replay": return "回放"
+        case "myscript" where ms: return "MyScript"
+        case "direct" where hasKey: return "百炼"
+        case "server" where hasServer: return "Server"
         default: return ms ? "MyScript" : hasKey ? "百炼" : hasServer ? "Server" : "回放"
         }
     }
