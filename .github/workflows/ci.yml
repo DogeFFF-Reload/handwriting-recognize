@@ -47,3 +47,30 @@ jobs:
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 || true
           grep -E "error:|BUILD (SUCCEEDED|FAILED)|iink SDK 没有编进来" build.log | sed -E 's#/Users/runner/work/[^ ]*/(Packages|app)/#\1/#' | sort -u | head -80
           grep -q "BUILD SUCCEEDED" build.log
+      # 不用真机看界面：在 iPad 模拟器上用 -demo 摆出几个画面截图（浅色 + 深色），作为 artifact 下载
+      - name: Screenshots on iPad Simulator
+        continue-on-error: true
+        run: |
+          DEV=$(xcrun simctl list devices available | grep -E "iPad Pro 13-inch \(M4\)|iPad Pro \(12\.9-inch\)" | head -1 | grep -oE "[0-9A-F-]{36}")
+          echo "device $DEV"
+          xcrun simctl boot "$DEV"
+          xcrun simctl bootstatus "$DEV" -b
+          xcrun simctl status_bar "$DEV" override --time 9:41 --batteryState charged --batteryLevel 100 || true
+          APP=$(find build/Build/Products -path "*iphonesimulator*" -name InkTutor.app | head -1)
+          xcrun simctl install "$DEV" "$APP"
+          mkdir -p shots
+          for look in light dark; do
+            xcrun simctl ui "$DEV" appearance $look
+            for s in menu card reveal; do
+              xcrun simctl launch --terminate-running-process "$DEV" dev.handwriting.inktutor -demo $s
+              sleep 7
+              xcrun simctl io "$DEV" screenshot "shots/$s-$look.png"
+            done
+          done
+          ls -la shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: shots
+          if-no-files-found: ignore

@@ -128,7 +128,7 @@ final class MyScriptMath {
         guard let engine else { throw MyScriptError.unavailable(status.summary) }
         let mm = Self.millimetersPerPoint
         let r = try engine.createRecognizer(scaleX: mm, scaleY: mm, type: "Math")
-        r.addDelegate(errors)
+        r.add(errors)
         recognizer = r
         return r
     }

@@ -29,6 +29,7 @@ struct SegmentMenu: View {
                 .frame(width: r.width, height: r.height)
                 .position(x: r.midX, y: r.midY)
                 .opacity(shown ? 1 : 0)
+                .animation(.easeOut(duration: 0.2), value: shown)
                 .allowsHitTesting(false)
 
             // 笔尖
@@ -37,6 +38,7 @@ struct SegmentMenu: View {
                 .background(Circle().fill(Theme.accent.opacity(0.15)))
                 .frame(width: 18, height: 18)
                 .scaleEffect(shown ? 1 : 0.2)
+                .animation(.spring(response: 0.3, dampingFraction: 0.6), value: shown)
                 .position(state.anchor)
                 .allowsHitTesting(false)
 

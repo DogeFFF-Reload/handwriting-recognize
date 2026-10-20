@@ -38,6 +38,14 @@ struct ContentView: View {
         }
         .animation(.easeOut(duration: 0.25), value: app.hasInk)
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .task {
+            // CI 截图：启动参数 -demo <名字>
+            let args = ProcessInfo.processInfo.arguments
+            if let i = args.firstIndex(of: "-demo"), i + 1 < args.count {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                app.loadDemo(args[i + 1])
+            }
+        }
     }
 }
 

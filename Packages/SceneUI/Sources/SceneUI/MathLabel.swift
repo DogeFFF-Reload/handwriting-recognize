@@ -29,6 +29,8 @@ public struct MathLabel: UIViewRepresentable {
 
     public func makeUIView(context: Context) -> MTMathUILabel {
         let v = MTMathUILabel()
+        // 只负责显示：点按、拖动交给外面的 SwiftUI 手势（点式子选中、拖式子移动）
+        v.isUserInteractionEnabled = false
         v.displayErrorInline = false
         v.setContentHuggingPriority(.required, for: .vertical)
         v.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

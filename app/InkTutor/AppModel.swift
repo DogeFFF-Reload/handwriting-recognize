@@ -624,3 +624,54 @@ final class AppModel {
         fileURL: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent("replay-script.json"))
 }
+
+// MARK: - 演示画面（CI 在模拟器上截图用）
+
+extension AppModel {
+    /// 启动参数 `-demo menu|card|reveal`：摆出黄金路径上的几个画面，不用真机也能看界面。识别结果直接给定，不走识别器。
+    func loadDemo(_ name: String) {
+        clear()
+        let left: CGFloat = 120
+        if name == "menu" {
+            setDrawing(PKDrawing(strokes: DemoInk.strokes("f(x)=x^3-5x", at: CGPoint(x: left, y: 226), height: 54)))
+            let ink = InkSegmenter.bounds(of: strokes)
+            pencilDoubleTapped(at: CGPoint(x: ink.maxX + 18, y: ink.maxY - 4))
+            return
+        }
+        // 第一幕结束时的函数，已经收成标准式子
+        setDrawing(PKDrawing(strokes: DemoInk.strokes("f(x)=x^3-3x", at: CGPoint(x: left, y: 226), height: 54)))
+        guard let seg = segment(near: nil) else { return }
+        finishFunction(seg, result: RecognitionResult(lineID: "F1", revision: 1, latex: "f\\left( x\\right) =x^{3}-3x",
+                                                      engine: "MyScript", ms: 164),
+                       target: nil, lineID: nextLineID("F"), revision: 1, ink: seg.strokeIDs.compactMap { pkByID[$0] })
+        // 第二幕：导数那一行留着笔迹
+        let fixed = name == "reveal"
+        let derivative = fixed ? "f'(x)=3x^2-3" : "f'(x)=3x^2-3x"
+        var d = drawing
+        d.strokes.append(contentsOf: DemoInk.strokes(derivative, at: CGPoint(x: left, y: 470), height: 54,
+                                                     start: Date(timeIntervalSinceReferenceDate: 800_000_100)))
+        setDrawing(d)
+        if let seg2 = segment(near: nil) {
+            let item = DerivationItem(lineID: nextLineID("D"), strokeIDs: Set(seg2.strokeIDs), band: seg2.bounds)
+            item.revision = 1
+            derivations.append(item)
+            grade(item, line: makeLine(item.lineID, revision: 1, mode: .derivative, seg2), latex: derivative)
+        }
+        guard let f = functions.first else { return }
+        if fixed {
+            f.showsSliders = true
+            f.card.size = CGSize(width: 430, height: 380)
+            f.card.center = CGPoint(x: f.anchor.x + 24 + 215, y: max(f.anchor.y - 12 - 190, topInset + 200))
+        } else {
+            f.card.rotation = .degrees(-4)
+            selection = f.id
+            // 再放一条收起来的函数，看胶囊的样子
+            let g = FunctionItem(lineID: nextLineID("F"), latex: "g(x)=\\sin x", origin: CGPoint(x: left, y: 650), fontSize: 34,
+                                 size: MathLabel.measure("g(x)=\\sin x", fontSize: 34),
+                                 card: CardFrame(center: CGPoint(x: 700, y: 640), size: CGSize(width: 360, height: 252), minimized: true),
+                                 tint: Theme.curve(1))
+            apply(latex: g.latex, to: g)
+            functions.append(g)
+        }
+    }
+}
