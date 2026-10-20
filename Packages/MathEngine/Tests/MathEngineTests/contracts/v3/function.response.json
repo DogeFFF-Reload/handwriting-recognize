@@ -1,0 +1,91 @@
+{
+  "degraded" : [
+
+  ],
+  "engine" : "MathEngine (swift) 0.3.0",
+  "ok" : true,
+  "replayed" : false,
+  "scene" : {
+    "function" : {
+      "marks" : [
+        {
+          "kind" : "max",
+          "type" : "extremum",
+          "x" : -1.290994,
+          "y" : 4.303315
+        },
+        {
+          "slope" : 0,
+          "type" : "tangent",
+          "x" : -1.290994,
+          "y" : 4.303315
+        },
+        {
+          "kind" : "min",
+          "type" : "extremum",
+          "x" : 1.290994,
+          "y" : -4.303315
+        },
+        {
+          "slope" : 0,
+          "type" : "tangent",
+          "x" : 1.290994,
+          "y" : -4.303315
+        }
+      ],
+      "params" : [
+        {
+          "max" : 3,
+          "min" : -3,
+          "name" : "a",
+          "pow" : 3,
+          "sign" : 1,
+          "step" : 1,
+          "value" : 1
+        },
+        {
+          "max" : 10,
+          "min" : -10,
+          "name" : "b",
+          "pow" : 1,
+          "sign" : -1,
+          "step" : 1,
+          "value" : 5
+        }
+      ],
+      "terms" : [
+        {
+          "coef" : 1,
+          "param" : "a",
+          "pow" : 3,
+          "sign" : 1
+        },
+        {
+          "coef" : -5,
+          "param" : "b",
+          "pow" : 1,
+          "sign" : -1
+        }
+      ],
+      "view" : {
+        "x_max" : 6,
+        "x_min" : -6,
+        "y_max" : 10,
+        "y_min" : -10
+      }
+    },
+    "kind" : "function",
+    "lines" : [
+      {
+        "bbox" : [
+          40,
+          120,
+          420,
+          90
+        ],
+        "id" : "L1",
+        "latex" : "f(x)=x^3-5x"
+      }
+    ]
+  }
+}

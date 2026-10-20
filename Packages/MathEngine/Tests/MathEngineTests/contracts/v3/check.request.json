@@ -1,0 +1,51 @@
+{
+  "context" : {
+    "function_latex" : "f(x)=x^3-5x",
+    "variable" : "x"
+  },
+  "feedback_mode" : "direct",
+  "lines" : [
+    {
+      "bbox" : [
+        318,
+        336,
+        372,
+        44
+      ],
+      "latex" : "f'(x)=3x^2-5x",
+      "line_id" : "L2",
+      "revision" : 3
+    }
+  ],
+  "mode" : "derivative",
+  "options" : {
+    "max_errors" : 3,
+    "with_scene" : true
+  },
+  "region" : {
+    "h" : 140,
+    "scale" : 2,
+    "w" : 600,
+    "x" : 40,
+    "y" : 320
+  },
+  "strokes" : [
+    {
+      "id" : "s17",
+      "points" : [
+        [
+          318,
+          350,
+          1.2,
+          0.62
+        ],
+        [
+          319.4,
+          351.1,
+          1.23,
+          0.66
+        ]
+      ]
+    }
+  ]
+}

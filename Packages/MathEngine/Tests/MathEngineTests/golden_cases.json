@@ -1,0 +1,985 @@
+{
+  "version": 1,
+  "generated_by": "python-reference math_engine 0.1.0 (SymPy 1.14)",
+  "usage": "Swift MathEngine 的 XCTest 读这份文件；Python 参考实现也能重新生成它，两边跑同一份期望值。",
+  "note": "expected_latex 只存在于测试夹具里，不上线（线上 /check 不返回 expected_latex）。",
+  "parse": [
+    {
+      "id": "P01",
+      "latex": "f(x)=x^3-3x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P02",
+      "latex": "f'(x)=3x^2-3x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P03",
+      "latex": "f^{\\prime}(x)=3x^{2}-3x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P04",
+      "latex": "f'(x)=3x²−3x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P05",
+      "latex": "3 x^{2}-3 x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P06",
+      "latex": "x^3-x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -1.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P07",
+      "latex": "\\frac{1}{2}x^{2}",
+      "terms": [
+        {
+          "coef": 0.5,
+          "pow": 2
+        }
+      ]
+    },
+    {
+      "id": "P08",
+      "latex": "\\left( x+1 \\right)\\left( x-1 \\right)",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 2
+        },
+        {
+          "coef": -1.0,
+          "pow": 0
+        }
+      ]
+    },
+    {
+      "id": "P09",
+      "latex": "2x(x+1)",
+      "terms": [
+        {
+          "coef": 2.0,
+          "pow": 2
+        },
+        {
+          "coef": 2.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P10",
+      "latex": "x^3-3x^2+1",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 2
+        },
+        {
+          "coef": 1.0,
+          "pow": 0
+        }
+      ]
+    },
+    {
+      "id": "P11",
+      "latex": "3x^{2}-3\\cdot x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P12",
+      "latex": "f'(x)=3x**2-3x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P13",
+      "latex": "f'(x)=3x^(2)-3x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P14",
+      "latex": "1/2 x",
+      "terms": [
+        {
+          "coef": 0.5,
+          "pow": 1
+        }
+      ]
+    },
+    {
+      "id": "P15",
+      "latex": "y=x^2-1",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 2
+        },
+        {
+          "coef": -1.0,
+          "pow": 0
+        }
+      ]
+    },
+    {
+      "id": "P91",
+      "latex": "f(x)=x^{3}-3x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    },
+    {
+      "id": "P92",
+      "latex": "f\\left(x\\right)=x^{3}-3x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    },
+    {
+      "id": "P93",
+      "latex": "\\mathrm{f}(x)=x^{3}-3x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    },
+    {
+      "id": "P94",
+      "latex": "f(x)=x^{3}-3\\cdot x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    },
+    {
+      "id": "P95",
+      "latex": "f(x)=x^{3}-3\\,x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    },
+    {
+      "id": "P97",
+      "latex": "f'(x)=3x^{2}-3x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    },
+    {
+      "id": "P98",
+      "latex": "f^{\\prime}(x)=3x^{2}-3x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    },
+    {
+      "id": "P99",
+      "latex": "f'(x)=3x^{2}-3\\times x",
+      "terms": [
+        {
+          "coef": 3.0,
+          "pow": 2
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    },
+    {
+      "id": "P100",
+      "latex": "\\mathit{f}(x)=x^{3}-3x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    },
+    {
+      "id": "P96",
+      "latex": "f ( x ) = x ^ { 3 } - 3 x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "source": "suspected-iink"
+    }
+  ],
+  "equation": [
+    {
+      "id": "E01",
+      "latex": "2x+3=7",
+      "diff_terms": [
+        {
+          "coef": 2.0,
+          "pow": 1
+        },
+        {
+          "coef": -4.0,
+          "pow": 0
+        }
+      ]
+    },
+    {
+      "id": "E02",
+      "latex": "2x=4",
+      "diff_terms": [
+        {
+          "coef": 2.0,
+          "pow": 1
+        },
+        {
+          "coef": -4.0,
+          "pow": 0
+        }
+      ]
+    },
+    {
+      "id": "E03",
+      "latex": "2x=10",
+      "diff_terms": [
+        {
+          "coef": 2.0,
+          "pow": 1
+        },
+        {
+          "coef": -10.0,
+          "pow": 0
+        }
+      ]
+    },
+    {
+      "id": "E04",
+      "latex": "x^2-1=0",
+      "diff_terms": [
+        {
+          "coef": 1.0,
+          "pow": 2
+        },
+        {
+          "coef": -1.0,
+          "pow": 0
+        }
+      ]
+    }
+  ],
+  "function": [
+    {
+      "id": "F01",
+      "latex": "f(x)=x^3-3x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 1
+        }
+      ],
+      "params": [
+        {
+          "name": "a",
+          "value": 1.0,
+          "sign": 1,
+          "min": -3.0,
+          "max": 3.0
+        },
+        {
+          "name": "b",
+          "value": 3.0,
+          "sign": -1,
+          "min": -6.0,
+          "max": 6.0
+        }
+      ],
+      "extrema": [
+        {
+          "kind": "max",
+          "x": -1.0,
+          "y": 2.0
+        },
+        {
+          "kind": "min",
+          "x": 1.0,
+          "y": -2.0
+        }
+      ]
+    },
+    {
+      "id": "F02",
+      "latex": "x^3-x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -1.0,
+          "pow": 1
+        }
+      ],
+      "params": [
+        {
+          "name": "a",
+          "value": 1.0,
+          "sign": 1,
+          "min": -3.0,
+          "max": 3.0
+        },
+        {
+          "name": "b",
+          "value": 1.0,
+          "sign": -1,
+          "min": -3.0,
+          "max": 3.0
+        }
+      ],
+      "extrema": [
+        {
+          "kind": "max",
+          "x": -0.57735,
+          "y": 0.3849
+        },
+        {
+          "kind": "min",
+          "x": 0.57735,
+          "y": -0.3849
+        }
+      ]
+    },
+    {
+      "id": "F03",
+      "latex": "x^3-3x^2+1",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -3.0,
+          "pow": 2
+        },
+        {
+          "coef": 1.0,
+          "pow": 0
+        }
+      ],
+      "params": [
+        {
+          "name": "a",
+          "value": 1.0,
+          "sign": 1,
+          "min": -3.0,
+          "max": 3.0
+        },
+        {
+          "name": "b",
+          "value": 3.0,
+          "sign": -1,
+          "min": -6.0,
+          "max": 6.0
+        },
+        {
+          "name": "c",
+          "value": 1.0,
+          "sign": 1,
+          "min": -3.0,
+          "max": 3.0
+        }
+      ],
+      "extrema": [
+        {
+          "kind": "max",
+          "x": 0.0,
+          "y": 1.0
+        },
+        {
+          "kind": "min",
+          "x": 2.0,
+          "y": -3.0
+        }
+      ]
+    },
+    {
+      "id": "F04",
+      "latex": "x^2-4",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 2
+        },
+        {
+          "coef": -4.0,
+          "pow": 0
+        }
+      ],
+      "params": [
+        {
+          "name": "a",
+          "value": 1.0,
+          "sign": 1,
+          "min": -3.0,
+          "max": 3.0
+        },
+        {
+          "name": "b",
+          "value": 4.0,
+          "sign": -1,
+          "min": -8.0,
+          "max": 8.0
+        }
+      ],
+      "extrema": [
+        {
+          "kind": "min",
+          "x": 0.0,
+          "y": -4.0
+        }
+      ]
+    },
+    {
+      "id": "F05",
+      "latex": "f(x)=x^3-5x",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 3
+        },
+        {
+          "coef": -5.0,
+          "pow": 1
+        }
+      ],
+      "params": [
+        {
+          "name": "a",
+          "value": 1.0,
+          "sign": 1,
+          "min": -3.0,
+          "max": 3.0
+        },
+        {
+          "name": "b",
+          "value": 5.0,
+          "sign": -1,
+          "min": -10.0,
+          "max": 10.0
+        }
+      ],
+      "extrema": [
+        {
+          "kind": "max",
+          "x": -1.290994,
+          "y": 4.303315
+        },
+        {
+          "kind": "min",
+          "x": 1.290994,
+          "y": -4.303315
+        }
+      ]
+    },
+    {
+      "id": "F06",
+      "latex": "x^4-2x^2",
+      "terms": [
+        {
+          "coef": 1.0,
+          "pow": 4
+        },
+        {
+          "coef": -2.0,
+          "pow": 2
+        }
+      ],
+      "params": [
+        {
+          "name": "a",
+          "value": 1.0,
+          "sign": 1,
+          "min": -3.0,
+          "max": 3.0
+        },
+        {
+          "name": "b",
+          "value": 2.0,
+          "sign": -1,
+          "min": -4.0,
+          "max": 4.0
+        }
+      ],
+      "extrema": [
+        {
+          "kind": "min",
+          "x": -1.0,
+          "y": -1.0
+        },
+        {
+          "kind": "max",
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "kind": "min",
+          "x": 1.0,
+          "y": -1.0
+        }
+      ]
+    },
+    {
+      "id": "F07",
+      "latex": "f(x)=2x^3+x^2-4x",
+      "terms": [
+        {
+          "coef": 2.0,
+          "pow": 3
+        },
+        {
+          "coef": 1.0,
+          "pow": 2
+        },
+        {
+          "coef": -4.0,
+          "pow": 1
+        }
+      ],
+      "params": [
+        {
+          "name": "a",
+          "value": 2.0,
+          "sign": 1,
+          "min": -4.0,
+          "max": 4.0
+        },
+        {
+          "name": "b",
+          "value": 1.0,
+          "sign": 1,
+          "min": -3.0,
+          "max": 3.0
+        },
+        {
+          "name": "c",
+          "value": 4.0,
+          "sign": -1,
+          "min": -8.0,
+          "max": 8.0
+        }
+      ],
+      "extrema": [
+        {
+          "kind": "max",
+          "x": -1.0,
+          "y": 3.0
+        },
+        {
+          "kind": "min",
+          "x": 0.666667,
+          "y": -1.62963
+        }
+      ]
+    }
+  ],
+  "derivative": [
+    {
+      "id": "D01",
+      "context": "x^3-3x",
+      "latex": "f'(x)=3x^2-3x",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_term",
+          "wrong_latex": "-3x",
+          "expected_latex": "-3",
+          "span": [
+            4,
+            7
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D02",
+      "context": "x^3-3x",
+      "latex": "f'(x)=3x^2-3",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "id": "D03",
+      "context": "x^3-3x",
+      "latex": "f'(x)=-3x^2-3",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_sign",
+          "wrong_latex": "-3x^2",
+          "expected_latex": "3x^{2}",
+          "span": [
+            0,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D04",
+      "context": "x^3-3x",
+      "latex": "f'(x)=2x^2-3",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_coefficient",
+          "wrong_latex": "2x^2",
+          "expected_latex": "3x^{2}",
+          "span": [
+            0,
+            4
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D05",
+      "context": "x^3-3x",
+      "latex": "f'(x)=3x^2",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "missing_term",
+          "wrong_latex": null,
+          "expected_latex": "-3",
+          "span": null
+        }
+      ]
+    },
+    {
+      "id": "D06",
+      "context": "x^3-3x",
+      "latex": "f'(x)=x^3-3x",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "not_derivative",
+          "wrong_latex": "x^3-3x",
+          "expected_latex": null,
+          "span": null
+        }
+      ]
+    },
+    {
+      "id": "D07",
+      "context": "x^3-x",
+      "latex": "f'(x)=3x^2-1",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "id": "D08",
+      "context": "x^2-4",
+      "latex": "f'(x)=2x",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "id": "D09",
+      "context": "x^3-5x",
+      "latex": "f'(x)=3x^2-5",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "id": "D10",
+      "context": "x^3-5x",
+      "latex": "f'(x)=3x^2-5x",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_term",
+          "wrong_latex": "-5x",
+          "expected_latex": "-5",
+          "span": [
+            4,
+            7
+          ]
+        }
+      ]
+    },
+    {
+      "id": "D11",
+      "context": "x^3-5x",
+      "latex": "f'(x)=3x^2",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "missing_term",
+          "wrong_latex": null,
+          "expected_latex": "-5",
+          "span": null
+        }
+      ]
+    },
+    {
+      "id": "D12",
+      "context": "x^3-3x",
+      "latex": "f'(x)=3x^2-3",
+      "ok": true,
+      "errors": []
+    }
+  ],
+  "matrix": [
+    {
+      "id": "M01",
+      "latex": "\\begin{pmatrix}1 & 2 \\\\ 3 & 4\\end{pmatrix}\\begin{pmatrix}5 & 6 \\\\ 7 & 8\\end{pmatrix}=\\begin{pmatrix}19 & 22 \\\\ 43 & 50\\end{pmatrix}",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "id": "M02",
+      "latex": "\\begin{pmatrix}1 & 2 \\\\ 3 & 4\\end{pmatrix}\\begin{pmatrix}5 & 6 \\\\ 7 & 8\\end{pmatrix}=\\begin{pmatrix}19 & 22 \\\\ 43 & 49\\end{pmatrix}",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_element",
+          "row": 2,
+          "col": 2,
+          "wrong_latex": "49",
+          "expected_latex": "50"
+        }
+      ]
+    }
+  ],
+  "integral": [
+    {
+      "id": "I01",
+      "latex": "\\int 2x dx = x^2",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "id": "I02",
+      "latex": "\\int 2x dx = x^2+C",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "id": "I03",
+      "latex": "\\int 2x dx = x^2/2",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_coefficient",
+          "wrong_latex": "x^2/2"
+        }
+      ]
+    },
+    {
+      "id": "I04",
+      "latex": "\\int_0^1 2x dx = 1",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "id": "I05",
+      "latex": "\\int_0^1 2x dx = 2",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_coefficient",
+          "wrong_latex": "2"
+        }
+      ]
+    }
+  ],
+  "step": [
+    {
+      "id": "S01",
+      "lines": [
+        "2x+3=7",
+        "2x=4"
+      ],
+      "ok": true,
+      "errors": []
+    },
+    {
+      "id": "S02",
+      "lines": [
+        "2x+3=7",
+        "2x=10"
+      ],
+      "ok": false,
+      "errors": [
+        {
+          "kind": "not_equivalent",
+          "line_id": "L2"
+        }
+      ]
+    },
+    {
+      "id": "S03",
+      "lines": [
+        "x^2-1=0",
+        "x^2=1"
+      ],
+      "ok": true,
+      "errors": []
+    }
+  ]
+}
