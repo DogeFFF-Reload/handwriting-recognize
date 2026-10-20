@@ -58,6 +58,9 @@ jobs:
           xcrun simctl status_bar "$DEV" override --time 9:41 --batteryState charged --batteryLevel 100 || true
           APP=$(find build/Build/Products -path "*iphonesimulator*" -name InkTutor.app | head -1)
           xcrun simctl install "$DEV" "$APP"
+          # 装完第一次启动很慢：先空启动一次，免得第一张截成白屏
+          xcrun simctl launch "$DEV" dev.handwriting.inktutor
+          sleep 15
           mkdir -p shots
           for look in light dark; do
             xcrun simctl ui "$DEV" appearance $look

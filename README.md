@@ -23,6 +23,12 @@ P2、P3、P4 把源码推到自己的分支。`main` 只表示这一版已经在
 
 识别链：MyScript（设备上）→ 百炼 → Mac 上的 Server；都没有就回放，前两幕不靠网络。设置里可以指定引擎。
 
+界面（CI 在 iPad 模拟器上用 `-demo` 摆出来截的，见 `docs/screenshots/`；每次带 `[mac]` 的构建都会重截一套浅色 + 深色，在 Actions 的 `screenshots` 里下载）：
+
+| 双击后笔尖旁的菜单 | 标准式子 + 函数卡片（选中，可变换）+ 推导批注 | 改对之后：极值点、切线、导函数、滑条 |
+| --- | --- | --- |
+| ![](docs/screenshots/menu-dark.png) | ![](docs/screenshots/card.png) | ![](docs/screenshots/reveal.png) |
+
 ## MyScript iink
 
 - SDK：Swift 包 [MyScript/interactive-ink-packages-ios](https://github.com/MyScript/interactive-ink-packages-ios) 4.5.1，工程里已经加好（product `libiink`）。
