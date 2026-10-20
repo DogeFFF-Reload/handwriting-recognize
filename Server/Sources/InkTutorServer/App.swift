@@ -44,9 +44,12 @@ func configure(_ app: Application, model: ModelClient? = nil) throws {
     if modelClient == nil { app.logger.warning("没有百炼 Key：只能用回放（INKTUTOR_REPLAY=play）") }
 
     let mode = ReplayStore.Mode(rawValue: Environment.get("INKTUTOR_REPLAY") ?? "fallback") ?? .fallback
-    let store = ReplayStore(mode: mode, directory: URL(fileURLWithPath: app.directory.workingDirectory + "replay"))
+    let replayDir = URL(fileURLWithPath: app.directory.workingDirectory + "replay")
+    let store = ReplayStore(mode: mode, directory: replayDir)
+    let recognizeReplay = RecognizeReplay(mode: mode, directory: replayDir)
     let book = HintBook()
     app.logger.notice("回放模式：\(mode.rawValue)")
+    registerMathRoutes(app, book: book)
 
     app.get("health") { _ in "ok" }
 
@@ -55,7 +58,7 @@ func configure(_ app: Application, model: ModelClient? = nil) throws {
         let up = try req.content.decode(UploadRequest.self)
         guard let img = up.imageBase64, !img.isEmpty else { throw Abort(.badRequest, reason: "缺 image_base64") }
         let t0 = Date()
-        let (text, replayed) = try await withReplayFallback(store: store, route: "recognize") {
+        let (text, replayed) = try await recognizeWithReplay(recognizeReplay, upload: up) {
             guard let m = modelClient else { throw Abort(.serviceUnavailable, reason: "no key") }
             var lastError: Error = Abort(.badGateway)
             for name in ["qwen3.8-flash", "qwen3-vl-plus"] {
@@ -71,6 +74,13 @@ func configure(_ app: Application, model: ModelClient? = nil) throws {
                                        engine: replayed ? "replay" : "qwen", ms: Int(Date().timeIntervalSince(t0) * 1000))
         req.logger.info("recognize \(up.lineID)#\(up.revision) → \(text) (\(result.ms ?? 0) ms\(replayed ? ", 回放" : ""))")
         return try jsonResponse(result)
+    }
+
+    // 演示从头来（App 清屏）：回放的行号重新从第 1 行数，/hint 回放从第一条放。
+    app.post("replay", "reset") { _ async -> String in
+        await recognizeReplay.reset()
+        await store.reset()
+        return "ok"
     }
 
     // 登记一次提示，返回 hint_url（/check 判出错后由 App 或 MathEngine 调用）。

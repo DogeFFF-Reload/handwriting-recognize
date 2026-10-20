@@ -1,0 +1,42 @@
+{
+  "context" : {
+    "template" : "triangle_median"
+  },
+  "mode" : "geometry",
+  "points" : [
+    {
+      "free" : true,
+      "id" : "A",
+      "x" : 340,
+      "y" : 424
+    },
+    {
+      "free" : true,
+      "id" : "B",
+      "x" : 88,
+      "y" : 676
+    },
+    {
+      "free" : true,
+      "id" : "C",
+      "x" : 592,
+      "y" : 676
+    },
+    {
+      "free" : false,
+      "id" : "Ma",
+      "x" : 340,
+      "y" : 676
+    }
+  ],
+  "relations" : [
+    {
+      "of" : [
+        "B",
+        "C"
+      ],
+      "point" : "Ma",
+      "type" : "midpoint"
+    }
+  ]
+}

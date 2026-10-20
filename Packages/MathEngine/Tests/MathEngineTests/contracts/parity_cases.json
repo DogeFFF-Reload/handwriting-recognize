@@ -1,0 +1,323 @@
+{
+  "generated_by": "server/tools/export_parity.py（Python + SymPy 参考实现）",
+  "note": "Swift 侧 XCTest 与 p4tool parity 读这份文件；改了判分逻辑要重新生成。",
+  "checks": [
+    {
+      "id": "C01",
+      "mode": "derivative",
+      "latex": "f'(x)=3x^2-3x",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_term",
+          "wrong_latex": "-3x",
+          "expected_latex": "-3",
+          "char_span": [
+            4,
+            7
+          ]
+        }
+      ],
+      "checked_latex": "3x^2-3x",
+      "function_latex": "x^3-3x"
+    },
+    {
+      "id": "C02",
+      "mode": "derivative",
+      "latex": "f'(x)=3x^2-3",
+      "ok": true,
+      "errors": [],
+      "checked_latex": "3x^2-3",
+      "function_latex": "x^3-3x"
+    },
+    {
+      "id": "C03",
+      "mode": "derivative",
+      "latex": "f'(x)=-3x^2-3",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_sign",
+          "wrong_latex": "-3x^2",
+          "expected_latex": "3x^{2}",
+          "char_span": [
+            0,
+            5
+          ]
+        }
+      ],
+      "checked_latex": "-3x^2-3",
+      "function_latex": "x^3-3x"
+    },
+    {
+      "id": "C04",
+      "mode": "derivative",
+      "latex": "f'(x)=2x^2-3",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_coefficient",
+          "wrong_latex": "2x^2",
+          "expected_latex": "3x^{2}",
+          "char_span": [
+            0,
+            4
+          ]
+        }
+      ],
+      "checked_latex": "2x^2-3",
+      "function_latex": "x^3-3x"
+    },
+    {
+      "id": "C05",
+      "mode": "derivative",
+      "latex": "f'(x)=3x^2",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "missing_term",
+          "wrong_latex": null,
+          "expected_latex": "-3",
+          "char_span": null
+        }
+      ],
+      "checked_latex": "3x^2",
+      "function_latex": "x^3-3x"
+    },
+    {
+      "id": "C06",
+      "mode": "derivative",
+      "latex": "f'(x)=x^3-3x",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "not_derivative",
+          "wrong_latex": "x^3-3x",
+          "expected_latex": null,
+          "char_span": null
+        }
+      ],
+      "checked_latex": "x^3-3x",
+      "function_latex": "x^3-3x"
+    },
+    {
+      "id": "C07",
+      "mode": "derivative",
+      "latex": "f'(x)=3x^2-5x",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_term",
+          "wrong_latex": "-5x",
+          "expected_latex": "-5",
+          "char_span": [
+            4,
+            7
+          ]
+        }
+      ],
+      "checked_latex": "3x^2-5x",
+      "function_latex": "x^3-5x"
+    },
+    {
+      "id": "C08",
+      "mode": "derivative",
+      "latex": "f'(x)=3x^2-5",
+      "ok": true,
+      "errors": [],
+      "checked_latex": "3x^2-5",
+      "function_latex": "x^3-5x"
+    },
+    {
+      "id": "C09",
+      "mode": "derivative",
+      "latex": "f'(x)=4x^3-4x",
+      "ok": true,
+      "errors": [],
+      "checked_latex": "4x^3-4x",
+      "function_latex": "x^4-2x^2"
+    },
+    {
+      "id": "C10",
+      "mode": "derivative",
+      "latex": "f'(x)=3x^2-3x+1",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "extra_term",
+          "wrong_latex": "-3x",
+          "expected_latex": null,
+          "char_span": [
+            4,
+            7
+          ]
+        },
+        {
+          "kind": "wrong_coefficient",
+          "wrong_latex": "+1",
+          "expected_latex": "-3",
+          "char_span": [
+            7,
+            9
+          ]
+        }
+      ],
+      "checked_latex": "3x^2-3x+1",
+      "function_latex": "x^3-3x"
+    },
+    {
+      "id": "C11",
+      "mode": "derivative",
+      "latex": "f^{\\prime}(x)=3x^{2}-3x",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_term",
+          "wrong_latex": "-3x",
+          "expected_latex": "-3",
+          "char_span": [
+            6,
+            9
+          ]
+        }
+      ],
+      "checked_latex": "3x^{2}-3x",
+      "function_latex": "x^3-3x"
+    },
+    {
+      "id": "C12",
+      "mode": "derivative",
+      "latex": "f'(x)=3x^2-++",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "parse_error",
+          "wrong_latex": "f'(x)=3x^2-++",
+          "expected_latex": null,
+          "char_span": null
+        }
+      ],
+      "checked_latex": "3x^2-++",
+      "function_latex": "x^3-3x"
+    },
+    {
+      "id": "C13",
+      "mode": "matrix",
+      "latex": "\\begin{pmatrix}1 & 2 \\\\ 3 & 4\\end{pmatrix}\\begin{pmatrix}5 & 6 \\\\ 7 & 8\\end{pmatrix}=\\begin{pmatrix}19 & 22 \\\\ 43 & 49\\end{pmatrix}",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_element",
+          "wrong_latex": "49",
+          "expected_latex": "50",
+          "char_span": null
+        }
+      ],
+      "checked_latex": null
+    },
+    {
+      "id": "C14",
+      "mode": "integral",
+      "latex": "\\int 2x\\,dx = x^2/2",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_coefficient",
+          "wrong_latex": "x^2/2",
+          "expected_latex": "x^{2}",
+          "char_span": [
+            1,
+            6
+          ]
+        }
+      ],
+      "checked_latex": null
+    },
+    {
+      "id": "C15",
+      "mode": "integral",
+      "latex": "\\int_0^1 2x\\,dx = 2",
+      "ok": false,
+      "errors": [
+        {
+          "kind": "wrong_coefficient",
+          "wrong_latex": "2",
+          "expected_latex": "1",
+          "char_span": null
+        }
+      ],
+      "checked_latex": null
+    }
+  ],
+  "functions": [
+    {
+      "id": "F01",
+      "latex": "f(x)=x^3-3x",
+      "extrema": [
+        {
+          "kind": "max",
+          "x": -1.0,
+          "y": 2.0
+        },
+        {
+          "kind": "min",
+          "x": 1.0,
+          "y": -2.0
+        }
+      ]
+    },
+    {
+      "id": "F02",
+      "latex": "f(x)=x^3-5x",
+      "extrema": [
+        {
+          "kind": "max",
+          "x": -1.290994,
+          "y": 4.303315
+        },
+        {
+          "kind": "min",
+          "x": 1.290994,
+          "y": -4.303315
+        }
+      ]
+    },
+    {
+      "id": "F03",
+      "latex": "x^4-2x^2",
+      "extrema": [
+        {
+          "kind": "min",
+          "x": -1.0,
+          "y": -1.0
+        },
+        {
+          "kind": "max",
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "kind": "min",
+          "x": 1.0,
+          "y": -1.0
+        }
+      ]
+    },
+    {
+      "id": "F04",
+      "latex": "f(x)=2x^3+x^2-4x",
+      "extrema": [
+        {
+          "kind": "max",
+          "x": -1.0,
+          "y": 3.0
+        },
+        {
+          "kind": "min",
+          "x": 0.666667,
+          "y": -1.62963
+        }
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@ import Foundation
 /// 笔迹 → LaTeX。一个协议，几个实现（开发方向报告 P3 的 InkRecognizer）：
 /// - `ServerRecognizer`：把这一行的截图交给 Mac 上的 Server，Server 调 Qwen（qwen3.8-flash 看图）。
 /// - `DashScopeRecognizer`：不经 Server 直接调百炼（只在演示机自己的 iPad 上、Key 不进仓库时用）。
-/// - `ReplayRecognizer`：录好的 LaTeX，断网演示用。
+/// - `ReplayRecognizer`：录好的 LaTeX，按行、擦除轮次、笔画数取，断网演示用（见 Replay.swift）。
 /// - `AppleStrokeRecognizer`（iPadOS 27 的 PKStrokeRecognizer，设备上）：见 AppleStrokeRecognizer.swift。
 /// MyScript iink 由 P1 在 App 里接，同样实现这个协议即可。
 public protocol InkRecognizer {
@@ -27,6 +27,30 @@ public let recognitionPrompt = """
 图里没有字或只是涂改的痕迹，就输出 {"latex": ""}。
 """
 
+/// 按顺序试几个识别器：前一个抛错或给了空结果就换下一个，最后一个的空结果照样返回（界面说「没认出来」）。
+/// 例如 MyScript（设备上）→ 百炼 → Server。
+public struct FallbackRecognizer: InkRecognizer {
+    public var chain: [InkRecognizer]
+
+    public init(_ chain: [InkRecognizer]) {
+        self.chain = chain
+    }
+
+    public func recognize(line: InkLine, imagePNG: Data?) async throws -> RecognitionResult {
+        var lastError: Error = RecognizerError.badResponse("没有可用的识别器")
+        for (k, r) in chain.enumerated() {
+            do {
+                let result = try await r.recognize(line: line, imagePNG: imagePNG)
+                if !result.latex.isEmpty || k == chain.count - 1 { return result }
+                lastError = RecognizerError.badResponse("空结果")
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+}
+
 /// 从模型回复里取出 {"latex": ...}。
 public func extractLatex(fromModelReply text: String) throws -> String {
     guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end,
@@ -36,21 +60,4 @@ public func extractLatex(fromModelReply text: String) throws -> String {
         throw RecognizerError.badResponse(String(text.prefix(120)))
     }
     return latex.trimmingCharacters(in: .whitespacesAndNewlines)
-}
-
-/// 录好的结果：按 (line_id, revision) 或按顺序返回。
-public final class ReplayRecognizer: InkRecognizer {
-    private var byKey: [String: String]
-    private var queue: [String]
-
-    public init(byLineRevision: [String: String] = [:], sequence: [String] = []) {
-        byKey = byLineRevision
-        queue = sequence
-    }
-
-    public func recognize(line: InkLine, imagePNG: Data?) async throws -> RecognitionResult {
-        let key = "\(line.id)#\(line.revision)"
-        let latex = byKey[key] ?? (queue.isEmpty ? "" : queue.removeFirst())
-        return RecognitionResult(lineID: line.id, revision: line.revision, latex: latex, engine: "replay", ms: 0)
-    }
 }

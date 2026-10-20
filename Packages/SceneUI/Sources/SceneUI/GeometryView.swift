@@ -7,12 +7,18 @@ import SwiftUI
 public struct GeometryView: View {
     @Bindable var model: SceneModel
     let scene: GeometryScene
+    /// false：不画自己的底色和圆角边框（放进 App 的浮动卡片里时用）。
+    var chrome: Bool
+    /// false：不接拖动（卡片正处在变换状态时）。
+    var interactive: Bool
     @State private var dragging: String?
     @State private var fit: CGAffineTransform?
 
-    public init(model: SceneModel, scene: GeometryScene) {
+    public init(model: SceneModel, scene: GeometryScene, chrome: Bool = true, interactive: Bool = true) {
         self.model = model
         self.scene = scene
+        self.chrome = chrome
+        self.interactive = interactive
     }
 
     public var body: some View {
@@ -23,12 +29,12 @@ public struct GeometryView: View {
                 draw(ctx: &ctx, pos: pos, t: t)
             }
             .contentShape(Rectangle())
-            .gesture(dragGesture(pos: pos, t: t))
+            .gesture(dragGesture(pos: pos, t: t), including: interactive ? .all : .none)
             .overlay(alignment: .topLeading) { caption(pos: pos) }
         }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.25)))
+        .background(chrome ? Color(.systemBackground) : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: chrome ? 12 : 0))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(chrome ? 0.25 : 0)))
         .accessibilityLabel("动态几何：拖动 A、B、C")
     }
 

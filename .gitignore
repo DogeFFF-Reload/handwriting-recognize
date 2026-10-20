@@ -1,5 +1,7 @@
 MyCertificate.c
 **/MyScriptCertificate/
+# MyScript 的识别资源（tools/myscript/fetch-assets.sh 下载）
+app/MyScript/
 .env
 *.mobileprovision
 xcuserdata/
