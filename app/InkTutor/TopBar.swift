@@ -25,7 +25,7 @@ struct TopBar: View {
             ToolButton(systemImage: "pencil.tip", title: "笔", selected: !app.eraserOn) {
                 withAnimation(.snappy(duration: 0.2)) { app.eraserOn = false }
             }
-            ToolButton(systemImage: "eraser", title: "橡皮", selected: app.eraserOn) {
+            ToolButton(systemImage: app.eraserOn ? "eraser.fill" : "eraser", title: "橡皮", selected: app.eraserOn) {
                 withAnimation(.snappy(duration: 0.2)) { app.eraserOn = true }
             }
             divider
@@ -38,7 +38,7 @@ struct TopBar: View {
                         }
                     } label: {
                         Circle()
-                            .fill(Color(c.uiColor))
+                            .fill(c.swatch)
                             .frame(width: 20, height: 20)
                             .padding(3)
                             .overlay(Circle().strokeBorder(app.penColor == c && !app.eraserOn ? Theme.accent : .clear, lineWidth: 2))
@@ -129,17 +129,23 @@ private struct ToolButton: View {
     var selected: Bool
     var action: () -> Void
 
+    private var tint: Color { selected ? Theme.accent : Color(UIColor.secondaryLabel) }
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 1) {
                 Image(systemName: systemImage)
                     .font(.system(size: 17, weight: .semibold))
-                    .symbolVariant(selected ? .fill : .none)
-                Text(title).font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(tint)
+                Text(title)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(tint)
             }
-            .foregroundStyle(selected ? Theme.accent : .secondary)
             .frame(width: 46, height: 40)
-            .background(selected ? Theme.accent.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(selected ? Theme.accent.opacity(0.13) : Color.clear)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

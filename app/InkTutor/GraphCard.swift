@@ -247,7 +247,7 @@ struct FunctionCard: View {
                 .pinned(.bottomLeading, at: CGPoint(x: item.anchor.x + 10, y: item.anchor.y - 2))
                 .transition(.scale(scale: 0.4).combined(with: .opacity))
             } else {
-                TransformableCard(frame: $item.card, selected: app.selection == item.id, dimmed: item.showingInk,
+                TransformableCard(frame: $item.card, selected: app.selection == .card(item.id), dimmed: item.showingInk,
                                   onSelect: { toggleSelection() }) {
                     header(graph)
                 } content: { interactive in
@@ -279,7 +279,7 @@ struct FunctionCard: View {
 
     private func toggleSelection() {
         withAnimation(.easeOut(duration: 0.15)) {
-            app.selection = app.selection == item.id ? nil : item.id
+            app.selection = app.selection == .card(item.id) ? nil : .card(item.id)
         }
     }
 
@@ -313,7 +313,7 @@ struct FunctionCard: View {
             }
             HeaderButton(systemImage: "arrow.down.right.and.arrow.up.left", help: "收起") {
                 withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-                    if app.selection == item.id { app.selection = nil }
+                    if app.selection?.id == item.id { app.selection = nil }
                     item.card.minimized = true
                 }
             }
@@ -338,8 +338,8 @@ struct GeometryCard: View {
                                               y: item.card.center.y - item.card.size.height / 2))
             .transition(.scale(scale: 0.4).combined(with: .opacity))
         } else {
-            TransformableCard(frame: $item.card, selected: app.selection == item.id, onSelect: {
-                withAnimation(.easeOut(duration: 0.15)) { app.selection = app.selection == item.id ? nil : item.id }
+            TransformableCard(frame: $item.card, selected: app.selection == .card(item.id), onSelect: {
+                withAnimation(.easeOut(duration: 0.15)) { app.selection = app.selection == .card(item.id) ? nil : .card(item.id) }
             }) {
                 HStack(spacing: 8) {
                     Image(systemName: "triangle").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.warn)

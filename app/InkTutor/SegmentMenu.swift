@@ -14,7 +14,7 @@ struct SegmentMenu: View {
     @State private var shown = false
     @State private var phase: CGFloat = 0
 
-    private let radius: CGFloat = 86
+    private let radius: CGFloat = 92
 
     var body: some View {
         ZStack {
@@ -42,11 +42,12 @@ struct SegmentMenu: View {
                 .position(state.anchor)
                 .allowsHitTesting(false)
 
+            let spots = fan()
             ForEach(Array(SegmentKind.allCases.enumerated()), id: \.element) { i, kind in
                 option(kind)
                     .scaleEffect(shown ? 1 : 0.3)
                     .opacity(shown ? 1 : 0)
-                    .position(shown ? point(i) : state.anchor)
+                    .position(shown ? spots[i] : state.anchor)
                     .animation(.spring(response: 0.34, dampingFraction: 0.7).delay(Double(i) * 0.035), value: shown)
             }
         }
@@ -56,13 +57,31 @@ struct SegmentMenu: View {
         }
     }
 
-    private func point(_ i: Int) -> CGPoint {
+    /// 三个圆钮的位置：绕笔尖展开成扇形，相邻隔 50°。优先往右上方展开（右手握笔时手在笔尖右下），
+    /// 依次换方向，选第一个既不压住这段笔迹、也不出屏幕、不钻到工具栏下面的。
+    private func fan() -> [CGPoint] {
         let a = state.anchor
-        let up = a.y - radius - 44 > topInset
-        let angles: [Double] = up ? [-152, -90, -28] : [152, 90, 28]
-        let t = angles[i] * .pi / 180
-        let p = CGPoint(x: a.x + radius * CGFloat(cos(t)), y: a.y + radius * CGFloat(sin(t)))
-        return CGPoint(x: min(max(p.x, 44), boardSize.width - 44), y: min(max(p.y, topInset + 40), boardSize.height - 44))
+        let ink = state.segment.bounds.insetBy(dx: -8, dy: -8)
+        let half: CGFloat = 34
+        func spots(_ center: Double) -> [CGPoint] {
+            [-50.0, 0, 50].map { d in
+                let t = (center + d) * .pi / 180
+                return CGPoint(x: a.x + radius * CGFloat(cos(t)), y: a.y + radius * CGFloat(sin(t)))
+            }
+        }
+        func fits(_ ps: [CGPoint]) -> Bool {
+            ps.allSatisfy { p in
+                let box = CGRect(x: p.x - half, y: p.y - half, width: 2 * half, height: 2 * half)
+                return !box.intersects(ink) && box.minX > 8 && box.maxX < boardSize.width - 8
+                    && box.minY > topInset && box.maxY < boardSize.height - 8
+            }
+        }
+        for center in [-60.0, -90, -30, 0, -120, -150, 180, 30, 150, 60, 120, 90] where fits(spots(center)) {
+            return spots(center)
+        }
+        return spots(-90).map {
+            CGPoint(x: min(max($0.x, 44), boardSize.width - 44), y: min(max($0.y, topInset + 40), boardSize.height - 44))
+        }
     }
 
     private func option(_ kind: SegmentKind) -> some View {

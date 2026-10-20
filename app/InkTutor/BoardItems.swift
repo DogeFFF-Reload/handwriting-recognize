@@ -43,6 +43,18 @@ struct InkSegment: Equatable {
     var targetID: UUID?
 }
 
+/// 选中的是哪一样：式子（出操作条）还是卡片（出变换框）。
+enum Selection: Equatable {
+    case formula(UUID)
+    case card(UUID)
+
+    var id: UUID {
+        switch self {
+        case .formula(let id), .card(let id): return id
+        }
+    }
+}
+
 /// 笔尖旁的菜单。
 struct SegmentMenuState: Equatable {
     var anchor: CGPoint

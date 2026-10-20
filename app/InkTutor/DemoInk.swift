@@ -28,7 +28,7 @@ enum DemoInk {
     ]
 
     /// 把一行写出来。`^` 表示后面一个字符是上标。返回的笔画按书写顺序，各自有不同的创建时间。
-    static func strokes(_ text: String, at origin: CGPoint, height: CGFloat, color: UIColor = .label,
+    static func strokes(_ text: String, at origin: CGPoint, height: CGFloat, color: UIColor = .black,
                         start: Date = Date(timeIntervalSinceReferenceDate: 800_000_000)) -> [PKStroke] {
         var out: [PKStroke] = []
         var x = origin.x

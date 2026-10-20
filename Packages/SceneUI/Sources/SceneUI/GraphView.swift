@@ -135,8 +135,8 @@ public struct FunctionGraphView: View {
 
     private func draw(_ ctx: inout GraphicsContext, size: CGSize, vp: GraphViewport) {
         let xr = vp.xRange(size), yr = vp.yRange(size)
-        let xStep = GraphTicks.step(unitsPerPoint: vp.unitsPerPointX)
-        let yStep = GraphTicks.step(unitsPerPoint: vp.unitsPerPointY)
+        let xStep = GraphTicks.step(unitsPerPoint: vp.unitsPerPointX, target: 64)
+        let yStep = GraphTicks.step(unitsPerPoint: vp.unitsPerPointY, target: 48)
         let ink = Color.primary
 
         // 次网格、主网格

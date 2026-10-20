@@ -24,7 +24,9 @@ final class AppModel {
     private(set) var derivations: [DerivationItem] = []
     private(set) var geometries: [GeometryItem] = []
     /// 选中的式子或卡片（显示操作条或变换框）。
-    var selection: UUID?
+    var selection: Selection?
+    /// 正在手动改 LaTeX 的式子（操作条上的「改式子」）。
+    var editingFormula: UUID?
     var menu: SegmentMenuState?
     private(set) var busy: [BusySegment] = []
     private(set) var ghosts: [InkGhost] = []
@@ -354,7 +356,7 @@ final class AppModel {
 
     func delete(_ item: FunctionItem, keepInk: Bool = false) {
         if item.showingInk, !keepInk { removeStrokes(Set(item.inkIDs)) }
-        if selection == item.id { selection = nil }
+        if selection?.id == item.id { selection = nil }
         withAnimation(.easeOut(duration: 0.2)) { functions.removeAll { $0.id == item.id } }
     }
 
@@ -468,7 +470,7 @@ final class AppModel {
     }
 
     func delete(_ item: GeometryItem) {
-        if selection == item.id { selection = nil }
+        if selection?.id == item.id { selection = nil }
         withAnimation(.easeOut(duration: 0.2)) { geometries.removeAll { $0.id == item.id } }
     }
 
@@ -659,12 +661,15 @@ extension AppModel {
         }
         guard let f = functions.first else { return }
         if fixed {
+            // 顺便看橡皮选中、式子操作条的样子
+            eraserOn = true
+            selection = .formula(f.id)
             f.showsSliders = true
             f.card.size = CGSize(width: 430, height: 380)
             f.card.center = CGPoint(x: f.anchor.x + 24 + 215, y: max(f.anchor.y - 12 - 190, topInset + 200))
         } else {
             f.card.rotation = .degrees(-4)
-            selection = f.id
+            selection = .card(f.id)
             // 再放一条收起来的函数，看胶囊的样子
             let g = FunctionItem(lineID: nextLineID("F"), latex: "g(x)=\\sin x", origin: CGPoint(x: left, y: 650), fontSize: 34,
                                  size: MathLabel.measure("g(x)=\\sin x", fontSize: 34),

@@ -26,6 +26,13 @@ struct BoardOverlay: View {
                 FunctionCard(item: item, app: app)
             }
 
+            // 式子的操作条画在卡片上面，不会被挂在右上角的卡片挡住
+            if case .formula(let id)? = app.selection, let item = app.functions.first(where: { $0.id == id }), !item.showingInk {
+                FormulaActionBar(item: item, app: app)
+                    .pinned(.bottomLeading, at: CGPoint(x: item.frame.minX - 10, y: item.frame.minY - 14))
+                    .transition(.opacity.combined(with: .offset(y: 6)))
+            }
+
             ForEach(app.busy) { BusyOverlay(job: $0) }
 
             if let menu = app.menu {
@@ -43,12 +50,15 @@ struct BoardOverlay: View {
 /// 换掉手写笔迹的标准式子。点一下出操作条：改式子、改笔迹、图像、删除；按住拖动，卡片一起走。
 struct FormulaView: View {
     @Bindable var item: FunctionItem
-    var app: AppModel
-    @State private var editing = false
+    @Bindable var app: AppModel
     @State private var editText = ""
     @State private var lastDrag: CGSize?
 
-    private var selected: Bool { app.selection == item.id }
+    private var selected: Bool { app.selection == .formula(item.id) }
+
+    private var editing: Binding<Bool> {
+        Binding(get: { app.editingFormula == item.id }, set: { if !$0 { app.editingFormula = nil } })
+    }
 
     var body: some View {
         if item.showingInk {
@@ -88,7 +98,7 @@ struct FormulaView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture {
-                withAnimation(.easeOut(duration: 0.15)) { app.selection = selected ? nil : item.id }
+                withAnimation(.easeOut(duration: 0.15)) { app.selection = selected ? nil : .formula(item.id) }
             }
             .gesture(
                 DragGesture(minimumDistance: 6, coordinateSpace: .named(Board.space))
@@ -99,9 +109,6 @@ struct FormulaView: View {
                     }
                     .onEnded { _ in lastDrag = nil }
             )
-            .overlay(alignment: .topLeading) {
-                if selected { actionBar.fixedSize().offset(y: -50).transition(.opacity.combined(with: .offset(y: 6))) }
-            }
             .overlay(alignment: .bottomLeading) {
                 if let problem = item.problem {
                     Label("无法作图：\(problem)", systemImage: "exclamationmark.triangle.fill")
@@ -111,10 +118,13 @@ struct FormulaView: View {
                         .background(Theme.warn.opacity(0.1), in: Capsule())
                         .fixedSize()
                         .offset(y: 30)
-                        .onTapGesture { beginEditing() }
+                        .onTapGesture { app.editingFormula = item.id }
                 }
             }
-            .alert("改一下式子", isPresented: $editing) {
+            .onChange(of: app.editingFormula) { _, id in
+                if id == item.id { editText = item.latex }
+            }
+            .alert("改一下式子", isPresented: editing) {
                 TextField("LaTeX，例如 f(x)=x^3-3x", text: $editText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -125,9 +135,16 @@ struct FormulaView: View {
             }
     }
 
-    private var actionBar: some View {
+}
+
+/// 选中式子时浮在它上方的操作条：改式子、改笔迹、收起 / 展开图像、删除，最后写着是哪个引擎认的。
+struct FormulaActionBar: View {
+    @Bindable var item: FunctionItem
+    var app: AppModel
+
+    var body: some View {
         HStack(spacing: 2) {
-            BarButton(title: "改式子", systemImage: "character.cursor.ibeam") { beginEditing() }
+            BarButton(title: "改式子", systemImage: "character.cursor.ibeam") { app.editingFormula = item.id }
             BarButton(title: "改笔迹", systemImage: "scribble.variable") { app.restoreInk(item) }
             if item.graph != nil {
                 BarButton(title: item.card.minimized ? "展开图像" : "收起图像",
@@ -147,11 +164,6 @@ struct FormulaView: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Theme.hairline))
         .shadow(color: .black.opacity(0.1), radius: 10, y: 4)
-    }
-
-    private func beginEditing() {
-        editText = item.latex
-        editing = true
     }
 }
 

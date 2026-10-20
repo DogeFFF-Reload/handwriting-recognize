@@ -36,18 +36,25 @@ enum Theme {
     static func curve(_ index: Int) -> Color { curves[index % curves.count] }
 }
 
-/// 笔的颜色。墨色跟着深浅色模式走。
+/// 笔的颜色。
 enum PenColor: String, CaseIterable, Identifiable {
     case ink, blue, red
 
     var id: String { rawValue }
 
+    /// 交给 PencilKit 的颜色：按浅色模式给，深色模式下 PencilKit 自己把黑墨显示成白的。
+    /// （给 .label 这种动态色会被反转两次，深色模式下墨迹反而是黑的。）
     var uiColor: UIColor {
         switch self {
-        case .ink: return .label
+        case .ink: return .black
         case .blue: return UIColor(red: 0.16, green: 0.33, blue: 0.78, alpha: 1)
         case .red: return UIColor(red: 0.80, green: 0.22, blue: 0.18, alpha: 1)
         }
+    }
+
+    /// 工具栏上的色块：墨色跟着深浅色模式走。
+    var swatch: Color {
+        self == .ink ? Color(UIColor.label) : Color(uiColor)
     }
 
     var name: String {
