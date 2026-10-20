@@ -101,6 +101,7 @@ struct SettingsView: View {
     @AppStorage("dashscopeKey") private var key = ""
     @AppStorage("serverURL") private var server = ""
     @AppStorage("allowFinger") private var allowFinger = false
+    @AppStorage("recordReplay") private var recordReplay = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -126,6 +127,13 @@ struct SettingsView: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                }
+                Section {
+                    Toggle("录制回放（彩排时打开）", isOn: $recordReplay)
+                    Button("清除录好的回放", role: .destructive) { AppModel.replayRecorder.clear() }
+                } footer: {
+                    Text("打开后，真识别的结果按「第几行、擦过几轮、这一轮写了几笔」记下来，断网或选「回放」时照着放。"
+                         + "演示的人按真实写法把黄金路径走一遍就行；没录过的行用内置的。")
                 }
                 Section {
                     Toggle("允许手指书写（没有 Pencil 时测试用）", isOn: $allowFinger)

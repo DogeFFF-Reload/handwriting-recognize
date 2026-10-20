@@ -96,6 +96,13 @@ final class AppModel {
 
     func clear() {
         clearToken += 1
+        // 演示从头来：回放的行号重新从第 1 行数（Server 那边也一起）。
+        Self.replayTracker.reset()
+        if let s = URL(string: UserDefaults.standard.string(forKey: "serverURL") ?? ""), s.host != nil {
+            var req = URLRequest(url: s.appendingPathComponent("replay/reset"))
+            req.httpMethod = "POST"
+            URLSession.shared.dataTask(with: req).resume()
+        }
     }
 
     // MARK: 识别
@@ -113,7 +120,7 @@ final class AppModel {
         }
         guard let png = PencilKitBridge.png(of: line, in: drawing, ids: &ids) else { return }
         if echo[line.id] == nil { notices[line.id] = nil }
-        let recognizer = makeRecognizer()
+        let recognizer = Self.makeRecognizer()
         Task { @MainActor [weak self] in
             do {
                 let r = try await recognizer.recognize(line: line, imagePNG: png)
@@ -170,38 +177,34 @@ final class AppModel {
 
     // MARK: 识别引擎（设置页里选）
 
-    func makeRecognizer() -> InkRecognizer {
+    static func makeRecognizer() -> InkRecognizer {
         let d = UserDefaults.standard
         let engine = d.string(forKey: "engine") ?? "auto"
         let key = (d.string(forKey: "dashscopeKey") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let server = URL(string: d.string(forKey: "serverURL") ?? "")
+        let live: InkRecognizer?
         switch engine {
-        case "direct" where !key.isEmpty: return DashScopeRecognizer(apiKey: key)
-        case "server" where server?.host != nil: return ServerRecognizer(baseURL: server!)
-        case "replay": return ScriptReplayRecognizer()
+        case "direct" where !key.isEmpty: live = DashScopeRecognizer(apiKey: key)
+        case "server" where server?.host != nil: live = ServerRecognizer(baseURL: server!)
+        case "replay": live = nil
         default:
-            if !key.isEmpty { return DashScopeRecognizer(apiKey: key) }
-            if let s = server, s.host != nil { return ServerRecognizer(baseURL: s) }
-            return ScriptReplayRecognizer()
+            if !key.isEmpty { live = DashScopeRecognizer(apiKey: key) }
+            else if let s = server, s.host != nil { live = ServerRecognizer(baseURL: s) }
+            else { live = nil }
         }
+        guard let live else {
+            return ReplayRecognizer(script: ReplayScript.golden.overlaid(with: replayRecorder.script), tracker: replayTracker)
+        }
+        // 真识别也让回放的行状态跟着走，中途切到回放不会数错；设置里打开「录制回放」时顺便录下来。
+        return TrackingRecognizer(live, tracker: replayTracker,
+                                  recorder: d.bool(forKey: "recordReplay") ? replayRecorder : nil)
     }
 }
 
-/// 没接识别引擎时按演示脚本回放，不靠停笔次数往下走。
-/// 一行还没擦过：函数幕是 x^3-5x，推导幕是写错的 3x^2-3x。
-/// 这一行出现过擦除：函数幕变成 x^3-3x，推导幕变成改对的 3x^2-3。
-struct ScriptReplayRecognizer: InkRecognizer {
-    func recognize(line: InkLine, imagePNG: Data?) async throws -> RecognitionResult {
-        let edited = !line.removedStrokeIDs.isEmpty
-        let latex: String
-        switch line.mode {
-        case .function:
-            latex = edited ? "f(x)=x^3-3x" : "f(x)=x^3-5x"
-        case .derivative:
-            latex = edited ? "f'(x)=3x^2-3" : "f'(x)=3x^2-3x"
-        case .geometry:
-            latex = ""
-        }
-        return RecognitionResult(lineID: line.id, revision: line.revision, latex: latex, engine: "replay", ms: 0)
-    }
+    /// 回放按「哪种模式的第几行 + 擦过几轮 + 这一轮新写了几笔」取，不按调用顺序：所有引擎共用这一份行状态。
+    static let replayTracker = ReplayTracker()
+    /// 彩排时录下的回放，存在这台 iPad 的 Documents/replay-script.json；录过的行替换内置的黄金路径。
+    static let replayRecorder = ReplayRecorder(
+        fileURL: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("replay-script.json"))
 }
