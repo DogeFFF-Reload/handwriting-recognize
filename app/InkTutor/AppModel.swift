@@ -76,6 +76,13 @@ final class AppModel {
 
     func clear() {
         clearToken += 1
+        // 演示从头来：回放的行号重新从第 1 行数（Server 那边也一起）。
+        Self.replayTracker.reset()
+        if let s = URL(string: UserDefaults.standard.string(forKey: "serverURL") ?? ""), s.host != nil {
+            var req = URLRequest(url: s.appendingPathComponent("replay/reset"))
+            req.httpMethod = "POST"
+            URLSession.shared.dataTask(with: req).resume()
+        }
     }
 
     // MARK: 识别
@@ -150,23 +157,33 @@ final class AppModel {
 
     // MARK: 识别引擎（设置页里选）
 
-    static let goldenReplay = ["f(x)=x^3-5x", "f(x)=x^3-3x", "f'(x)=3x^2-3x", "f'(x)=3x^2-3"]
-
     static func makeRecognizer() -> InkRecognizer {
         let d = UserDefaults.standard
         let engine = d.string(forKey: "engine") ?? "auto"
         let key = (d.string(forKey: "dashscopeKey") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let server = URL(string: d.string(forKey: "serverURL") ?? "")
+        let live: InkRecognizer?
         switch engine {
-        case "direct" where !key.isEmpty: return DashScopeRecognizer(apiKey: key)
-        case "server" where server?.host != nil: return ServerRecognizer(baseURL: server!)
-        case "replay": return replay
+        case "direct" where !key.isEmpty: live = DashScopeRecognizer(apiKey: key)
+        case "server" where server?.host != nil: live = ServerRecognizer(baseURL: server!)
+        case "replay": live = nil
         default:
-            if !key.isEmpty { return DashScopeRecognizer(apiKey: key) }
-            if let s = server, s.host != nil { return ServerRecognizer(baseURL: s) }
-            return replay
+            if !key.isEmpty { live = DashScopeRecognizer(apiKey: key) }
+            else if let s = server, s.host != nil { live = ServerRecognizer(baseURL: s) }
+            else { live = nil }
         }
+        guard let live else {
+            return ReplayRecognizer(script: ReplayScript.golden.overlaid(with: replayRecorder.script), tracker: replayTracker)
+        }
+        // 真识别也让回放的行状态跟着走，中途切到回放不会数错；设置里打开「录制回放」时顺便录下来。
+        return TrackingRecognizer(live, tracker: replayTracker,
+                                  recorder: d.bool(forKey: "recordReplay") ? replayRecorder : nil)
     }
 
-    private static let replay = ReplayRecognizer(sequence: goldenReplay)
+    /// 回放按「哪种模式的第几行 + 擦过几轮 + 这一轮新写了几笔」取，不按调用顺序：所有引擎共用这一份行状态。
+    static let replayTracker = ReplayTracker()
+    /// 彩排时录下的回放，存在这台 iPad 的 Documents/replay-script.json；录过的行替换内置的黄金路径。
+    static let replayRecorder = ReplayRecorder(
+        fileURL: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("replay-script.json"))
 }
