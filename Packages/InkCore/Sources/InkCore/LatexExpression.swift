@@ -60,8 +60,8 @@ public indirect enum MathExpr: Equatable {
         switch self {
         case .number(let v): return clean([0: v])
         case .symbol(let s):
-            if s == variable { return [1: 1] }
-            return s == "e" ? [0: MathExpr.euler] : nil
+            // e 不算数字系数：e^x、ex 留成式子，求导和写回 LaTeX 时 e 还是 e
+            return s == variable ? [1: 1] : nil
         case .negate(let a): return a.polynomial(in: variable).map { $0.mapValues { -$0 } }
         case .add(let a, let b), .subtract(let a, let b):
             guard let p = a.polynomial(in: variable), var q = b.polynomial(in: variable) else { return nil }

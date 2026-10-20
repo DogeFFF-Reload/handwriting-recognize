@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 双击笔身后在笔尖旁弹出的菜单：函数 / 推导 / 几何。
+/// 双击笔身后在笔尖旁弹出的菜单：函数 / 求导 / 几何。
 ///
 /// 三个圆钮沿笔尖上方的一段圆弧展开（右手握笔时手在笔尖右下，不会挡住）；
 /// 笔尖离顶太近就翻到下方。要处理的那一段笔迹用流动的虚线框标出来。
@@ -118,7 +118,7 @@ struct SegmentMenu: View {
         switch kind {
         case .function:
             Text("ƒ(x)").font(.system(size: 19, design: .serif).italic())
-        case .derivation:
+        case .derivative:
             Text("ƒ′").font(.system(size: 21, design: .serif).italic())
         case .geometry:
             Image(systemName: "triangle").font(.system(size: 18, weight: .medium))

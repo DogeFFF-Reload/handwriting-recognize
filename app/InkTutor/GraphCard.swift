@@ -293,12 +293,19 @@ struct FunctionCard: View {
                                      startPoint: .leading, endPoint: .trailing))
                 .clipped()
             if graph.reveal {
-                Label("f′ 对了", systemImage: "checkmark")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Theme.ok)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Theme.ok.opacity(0.12), in: Capsule())
+                // 图例：绿色虚线是导函数
+                HStack(spacing: 5) {
+                    Path { p in
+                        p.move(to: CGPoint(x: 0, y: 1))
+                        p.addLine(to: CGPoint(x: 16, y: 1))
+                    }
+                    .stroke(Theme.ok, style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                    .frame(width: 16, height: 2)
+                    Text("\(item.name)′").font(.system(size: 13, design: .serif).italic())
+                }
+                .foregroundStyle(Theme.ok)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Theme.ok.opacity(0.12), in: Capsule())
             }
             if graph.hasSliders {
                 HeaderButton(systemImage: "slider.horizontal.3", active: item.showsSliders, help: "参数滑条") {

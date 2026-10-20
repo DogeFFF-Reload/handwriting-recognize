@@ -2,7 +2,7 @@ import InkCore
 import SceneUI
 import SwiftUI
 
-/// 画在笔迹上面的一层，坐标全是画布 point：标准式子和函数卡片、推导行的回显和批注、几何卡片、
+/// 画在笔迹上面的一层，坐标全是画布 point：标准式子（含求出来的导数）和函数卡片、几何卡片、
 /// 笔尖菜单、识别中的流光、笔迹淡出、提示。空白处不接触摸，笔照样写在下面的画布上。
 struct BoardOverlay: View {
     @Bindable var app: AppModel
@@ -12,8 +12,6 @@ struct BoardOverlay: View {
             Color.clear.allowsHitTesting(false)
 
             ForEach(app.ghosts) { GhostView(ghost: $0) }
-
-            ForEach(app.derivations) { DerivationMarks(item: $0, app: app) }
 
             ForEach(app.functions) { item in
                 FormulaView(item: item, app: app)
@@ -84,7 +82,7 @@ struct FormulaView: View {
     }
 
     private var formula: some View {
-        MathLabel(item.latex, fontSize: item.fontSize, color: .label, style: .display)
+        MathLabel(item.displayLatex, fontSize: item.fontSize, color: .label, style: .display)
             .frame(width: item.size.width, height: item.size.height)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -153,6 +151,12 @@ struct FormulaActionBar: View {
                 }
             }
             BarButton(title: "删除", systemImage: "trash", role: .destructive) { app.delete(item) }
+            if let parent = item.derivedFrom.flatMap({ id in app.functions.first { $0.id == id } }) {
+                Text("由 \(parent.name)(x) 求导")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.ok)
+                    .padding(.leading, 6)
+            }
             if let engine = item.engine {
                 Text(item.ms.map { "\(engine) · \($0) ms" } ?? engine)
                     .font(.caption2.monospacedDigit())
@@ -187,106 +191,6 @@ private struct BarButton: View {
     }
 }
 
-// MARK: - 推导行
-
-/// 推导行的笔迹留在画布上：下面回显识别结果（点一下手动改），错项上画红圈，旁边是正确项和一句说明；对了打勾。
-struct DerivationMarks: View {
-    @Bindable var item: DerivationItem
-    var app: AppModel
-    @State private var editing = false
-    @State private var editText = ""
-
-    var body: some View {
-        let band = item.band
-        ZStack(alignment: .topLeading) {
-            Button {
-                editText = item.latex ?? ""
-                editing = true
-            } label: {
-                Group {
-                    if let latex = item.latex {
-                        MathLabel(latex, fontSize: 15, color: .secondaryLabel)
-                    } else if let n = item.notice {
-                        Text(n).font(.footnote).foregroundStyle(Theme.warn)
-                    } else {
-                        Text("识别中…").font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Theme.card.opacity(0.9), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Theme.hairline))
-            }
-            .buttonStyle(.plain)
-            .pinned(.topLeading, at: CGPoint(x: band.minX, y: band.maxY + 8))
-
-            if let n = item.notice, item.latex != nil {
-                Text(n).font(.footnote).foregroundStyle(Theme.warn)
-                    .padding(8).background(Theme.warn.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-                    .pinned(.leading, at: CGPoint(x: band.maxX + 18, y: band.midY))
-                    .allowsHitTesting(false)
-            }
-
-            if let a = item.annotation {
-                if a.ok {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 34))
-                        .foregroundStyle(Theme.ok)
-                        .symbolEffect(.bounce, value: a.revision)
-                        .position(x: band.maxX + 32, y: band.midY)
-                        .transition(.scale.combined(with: .opacity))
-                } else if let err = a.errors.first, let box = err.rect {
-                    ErrorCircle(box: box)
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let exp = err.expectedLatex, !exp.isEmpty {
-                            HStack(spacing: 6) {
-                                Text("应为").font(.footnote).foregroundStyle(.secondary)
-                                MathLabel(exp, fontSize: 22, color: UIColor(Theme.ok))
-                            }
-                        }
-                        if let e = a.explanation {
-                            Text(e).font(.callout).foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(12)
-                    .frame(width: 300, alignment: .leading)
-                    .background(CardBackground(radius: 14))
-                    .overlay(alignment: .leading) {
-                        Rectangle().fill(Theme.wrong).frame(width: 3).padding(.vertical, 12)
-                    }
-                    .pinned(.leading, at: CGPoint(x: box.maxX + 26, y: box.midY))
-                    .allowsHitTesting(false)
-                    .transition(.opacity.combined(with: .offset(x: -8)))
-                }
-            }
-        }
-        .alert("改一下识别结果", isPresented: $editing) {
-            TextField("LaTeX，例如 f'(x)=3x^2-3", text: $editText)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            Button("确定") { app.manualEdit(item, latex: editText) }
-            Button("取消", role: .cancel) {}
-        }
-    }
-}
-
-/// 手绘感的红圈，出现时「描」一遍。
-private struct ErrorCircle: View {
-    let box: CGRect
-    @State private var progress: CGFloat = 0
-
-    var body: some View {
-        Ellipse()
-            .trim(from: 0, to: progress)
-            .stroke(Theme.wrong, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-            .rotationEffect(.degrees(-120))
-            .frame(width: box.width + 28, height: box.height + 22)
-            .position(x: box.midX, y: box.midY)
-            .allowsHitTesting(false)
-            .onAppear { withAnimation(.easeOut(duration: 0.5)) { progress = 1 } }
-    }
-}
-
 // MARK: - 识别中、淡出、提示
 
 /// 正在识别的那一段：一层淡淡的底色，一道光扫过去，右下角写「识别中」。
@@ -307,7 +211,7 @@ private struct BusyOverlay: View {
             .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.mini)
-                    Text(job.kind == .function ? "识别中" : "批改中").font(.caption2.weight(.semibold))
+                    Text(job.kind == .derivative ? "求导中" : "识别中").font(.caption2.weight(.semibold))
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(.regularMaterial, in: Capsule())

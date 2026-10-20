@@ -6,14 +6,14 @@ import SwiftUI
 
 /// 双击笔身后在笔尖旁选的三种处理。
 enum SegmentKind: String, CaseIterable, Identifiable {
-    case function, derivation, geometry
+    case function, derivative, geometry
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .function: return "函数"
-        case .derivation: return "推导"
+        case .derivative: return "求导"
         case .geometry: return "几何"
         }
     }
@@ -21,7 +21,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
     var hint: String {
         switch self {
         case .function: return "收成标准式子并作图"
-        case .derivation: return "批改这一步"
+        case .derivative: return "直接求出导函数"
         case .geometry: return "收成动态几何"
         }
     }
@@ -29,7 +29,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
     var mode: InkMode {
         switch self {
         case .function: return .function
-        case .derivation: return .derivative
+        case .derivative: return .derivative
         case .geometry: return .geometry
         }
     }
@@ -39,7 +39,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
 struct InkSegment: Equatable {
     var strokeIDs: [String]
     var bounds: CGRect
-    /// 重新确认的是已有的哪一项（还原过笔迹的函数、留着笔迹的推导行）。
+    /// 重新确认的是已有的哪一项（还原过笔迹的式子）。
     var targetID: UUID?
 }
 
@@ -95,6 +95,7 @@ struct Toast: Identifiable, Equatable {
 }
 
 /// 一条函数：标准式子（换掉了手写笔迹）+ 右上角的函数卡片。
+/// 求出来的导数也是一条（derivedFrom 指向原函数），只有式子，没有自己的卡片：导函数画在原函数的卡片里。
 @Observable
 final class FunctionItem: Identifiable {
     let id = UUID()
@@ -123,6 +124,11 @@ final class FunctionItem: Identifiable {
     let tint: Color
     var engine: String?
     var ms: Int?
+    /// 求导得来的：原函数是哪一条、学生写的是 f'(x) 还是 f''(x)、f'(2)。原函数一改就重新求。
+    var derivedFrom: UUID?
+    var request: DerivativeRequest?
+    var lhsLatex: String?
+    var resultLatex: String?
 
     init(lineID: String, latex: String, origin: CGPoint, fontSize: CGFloat, size: CGSize, card: CardFrame, tint: Color) {
         self.lineID = lineID
@@ -135,15 +141,15 @@ final class FunctionItem: Identifiable {
     }
 
     var frame: CGRect { CGRect(origin: origin, size: size) }
+
+    /// 显示用的式子：求出来的那部分用绿色。
+    var displayLatex: String {
+        if let lhs = lhsLatex, let rhs = resultLatex { return lhs + "=\\color{#1E9E62}{" + rhs + "}" }
+        return latex
+    }
     /// 卡片挂在式子的右上角。
     var anchor: CGPoint { CGPoint(x: frame.maxX, y: frame.minY) }
     var name: String { definition?.name ?? "f" }
-
-    /// 批改导数时用的函数：多项式写成规范的 LaTeX（滑条改过系数也跟着变）。
-    var latexForChecking: String {
-        if let t = graph?.terms { return "f(x)=" + Poly.latex(t) }
-        return latex
-    }
 
     /// 滑条改了多项式系数之后，式子跟着重写（GeoGebra 里代数区和绘图区是同一个对象）。
     func rewriteFromTerms() {
@@ -151,27 +157,7 @@ final class FunctionItem: Identifiable {
         let lhs = d.name == "y" ? "y" : "\(d.name)(\(d.variable))"
         latex = lhs + "=" + Poly.latex(terms)
         size = MathLabel.measure(latex, fontSize: fontSize)
-    }
-}
-
-/// 一行推导：笔迹留着（圈要画在学生写的字上），下面回显识别结果，旁边是批注。
-@Observable
-final class DerivationItem: Identifiable {
-    let id = UUID()
-    let lineID: String
-    var revision = 0
-    var strokeIDs: Set<String>
-    var band: CGRect
-    var latex: String?
-    var annotation: Annotation?
-    var notice: String?
-    /// 批注对应的那一版笔迹；之后再改就把圈收起来。
-    var checkedStrokes: Set<String> = []
-
-    init(lineID: String, strokeIDs: Set<String>, band: CGRect) {
-        self.lineID = lineID
-        self.strokeIDs = strokeIDs
-        self.band = band
+        if let parsed = try? FunctionDefinition.parse(latex) { definition = parsed }
     }
 }
 

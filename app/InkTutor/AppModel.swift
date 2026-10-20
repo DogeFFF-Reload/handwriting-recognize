@@ -7,9 +7,10 @@ import SwiftUI
 /// 整块画板的状态。
 ///
 /// 全局规则：先只显示原始墨迹；学生写完一段，双击 Pencil Pro 表示这一段输入完了，
-/// 笔尖旁弹出「函数 / 推导 / 几何」。选「函数」时用 MyScript iink 的 Math Recognizer 把这段笔迹收成 LaTeX，
+/// 笔尖旁弹出「函数 / 求导 / 几何」。选「函数」时用 MyScript iink 的 Math Recognizer 把这段笔迹收成 LaTeX，
 /// 手写笔迹换成标准式子，式子右上角挂一张可以移动、缩放、旋转、收起的函数卡片。
-/// 推导和几何沿用 P3 的批改和草图识别，触发方式统一成双击后选。
+/// 在函数下面写 f'(x)，双击后选「求导」（选「函数」也行），App 直接把导函数求出来写上，图像里画出导函数。
+/// 几何沿用 P3 的草图识别，触发方式统一成双击后选。
 ///
 /// 所有回调都在主线程：PencilKit 回调、Pencil 双击、识别结果用 MainActor 切回来。
 @Observable
@@ -21,7 +22,6 @@ final class AppModel {
 
     // MARK: 画板上的东西
     private(set) var functions: [FunctionItem] = []
-    private(set) var derivations: [DerivationItem] = []
     private(set) var geometries: [GeometryItem] = []
     /// 选中的式子或卡片（显示操作条或变换框）。
     var selection: Selection?
@@ -77,20 +77,6 @@ final class AppModel {
             menu = nil
         }
 
-        // 推导行：擦掉的笔从这一行去掉；这一行被改过（擦了或在旁边新写了），旧的圈收起来
-        for item in derivations {
-            let before = item.strokeIDs
-            item.strokeIDs.formIntersection(present)
-            let touched = added.contains { $0.bounds.intersects(item.band.insetBy(dx: -24, dy: -12)) }
-            if item.strokeIDs != before || touched {
-                item.annotation = nil
-                item.notice = nil
-            }
-            if item.strokeIDs != before {
-                item.band = InkSegmenter.bounds(of: strokes.filter { item.strokeIDs.contains($0.id) })
-            }
-        }
-        derivations.removeAll { $0.strokeIDs.isEmpty }
         // 还原了笔迹的函数：擦掉的笔不再算它的；笔迹全擦光、原处也没写新的，就整条删掉
         for f in functions where f.showingInk {
             f.inkIDs = f.inkIDs.filter { present.contains($0) }
@@ -103,10 +89,9 @@ final class AppModel {
         strokes.contains { $0.bounds.intersects(f.frame.insetBy(dx: -30, dy: -20)) }
     }
 
-    /// 已经属于某一项的笔（推导行、还原了笔迹的函数），不算「新写的一段」。
+    /// 已经属于某一项的笔（还原了笔迹的式子），不算「新写的一段」。
     private var claimed: Set<String> {
         var s = Set<String>()
-        for d in derivations { s.formUnion(d.strokeIDs) }
         for f in functions where f.showingInk { s.formUnion(f.inkIDs) }
         return s
     }
@@ -146,7 +131,7 @@ final class AppModel {
         if let seed = InkSegmenter.seed(in: free, near: point) {
             picked = InkSegmenter.cluster(free, from: seed)
         }
-        // 碰到的已有项（留着笔迹的推导行、还原了笔迹的函数）整项并进来，改完重新确认
+        // 碰到还原了笔迹的式子，整项并进来，改完重新确认
         let reach: CGRect
         if picked.isEmpty {
             guard let point else { return latestClaimedSegment() }
@@ -156,10 +141,6 @@ final class AppModel {
         }
         var members = Set(picked.map(\.id))
         var target: UUID?
-        for d in derivations where d.band.intersects(reach) {
-            members.formUnion(d.strokeIDs)
-            target = target ?? d.id
-        }
         for f in functions where f.showingInk {
             let inkBounds = InkSegmenter.bounds(of: strokes.filter { f.inkIDs.contains($0.id) })
             // 原来的笔迹全擦了、在原处重写：按式子原来的位置认
@@ -178,10 +159,6 @@ final class AppModel {
             let s = strokes.filter { f.inkIDs.contains($0.id) }
             return InkSegment(strokeIDs: s.map(\.id), bounds: InkSegmenter.bounds(of: s), targetID: f.id)
         }
-        if let d = derivations.last {
-            let s = strokes.filter { d.strokeIDs.contains($0.id) }
-            return s.isEmpty ? nil : InkSegment(strokeIDs: s.map(\.id), bounds: InkSegmenter.bounds(of: s), targetID: d.id)
-        }
         return nil
     }
 
@@ -198,28 +175,25 @@ final class AppModel {
             toast("这一段正在识别", at: CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24), .info)
             return
         }
-        // 换了处理方式：原来那一项不要了（笔迹留着，按新的方式处理）
-        if let t = seg.targetID {
-            if kind != .derivation, let i = derivations.firstIndex(where: { $0.id == t }) { derivations.remove(at: i) }
-            if kind != .function, let f = functions.first(where: { $0.id == t }) { delete(f, keepInk: true) }
-        }
+        // 还原了笔迹的式子改成画几何：原来那一项不要了（笔迹留着）
+        if kind == .geometry, let t = seg.targetID, let f = functions.first(where: { $0.id == t }) { delete(f, keepInk: true) }
         switch kind {
-        case .function: recognizeFunction(seg)
-        case .derivation: checkDerivation(seg)
+        case .function, .derivative: recognizeMath(seg, kind)
         case .geometry: buildGeometry(seg)
         }
     }
 
     // MARK: 函数
 
-    private func recognizeFunction(_ seg: InkSegment) {
+    /// 函数和求导走同一条路：认出来是 f'(x) 就求导，是 f(x) = … 就作图，和菜单里选的是哪一项无关。
+    private func recognizeMath(_ seg: InkSegment, _ kind: SegmentKind) {
         let target = functions.first { $0.id == seg.targetID }
-        let lineID = target?.lineID ?? nextLineID("F")
+        let lineID = target?.lineID ?? nextLineID(kind == .derivative ? "D" : "F")
         let revision = (target?.revision ?? 0) + 1
         target?.revision = revision
-        let line = makeLine(lineID, revision: revision, mode: .function, seg)
+        let line = makeLine(lineID, revision: revision, mode: kind.mode, seg)
         let pk = seg.strokeIDs.compactMap { pkByID[$0] }
-        let job = BusySegment(bounds: seg.bounds, kind: .function)
+        let job = BusySegment(bounds: seg.bounds, kind: kind)
         busy.append(job)
         let png = PencilKitBridge.png(of: line, in: drawing, ids: &ids)
         let recognizer = Self.makeRecognizer(strokes: pk)
@@ -247,6 +221,13 @@ final class AppModel {
             toast("没认出来：写清楚一点再双击", at: below, .warning)
             return
         }
+        if let request = DerivativeRequest.parse(latex) {
+            finishDerivative(seg, request: request, result: r, target: target, lineID: lineID, revision: revision, ink: ink)
+            return
+        }
+        // 原来是求导的那一项，改写成了普通的函数：当作一条新函数
+        if let target, target.derivedFrom != nil { delete(target, keepInk: true) }
+        let reuse = target?.derivedFrom == nil ? target : nil
 
         // 标准式子放在原来那行笔迹的位置：左对齐，竖直居中，字号跟着手写的大小走
         let fontSize = min(max(seg.bounds.height * 0.62, 24), 64)
@@ -254,8 +235,8 @@ final class AppModel {
         let origin = CGPoint(x: seg.bounds.minX, y: seg.bounds.midY - size.height / 2)
 
         let item: FunctionItem
-        if let target {
-            item = target
+        if let reuse {
+            item = reuse
             item.latex = latex
             item.origin = origin
             item.fontSize = fontSize
@@ -264,17 +245,20 @@ final class AppModel {
             let frame = CGRect(origin: origin, size: size)
             item = FunctionItem(lineID: lineID, latex: latex, origin: origin, fontSize: fontSize, size: size,
                                 card: placeCard(next: frame, size: CGSize(width: 360, height: 252)),
-                                tint: Theme.curve(functions.count))
+                                tint: Theme.curve(functions.filter { $0.derivedFrom == nil }.count))
             item.revision = revision
         }
         item.engine = r.engine
         item.ms = r.ms
+        apply(latex: latex, to: item)
+        replaceInk(seg, ink: ink, with: item, isNew: reuse == nil)
+    }
+
+    /// 笔迹淡出、式子淡入，然后把这段笔迹从画布上收走（「改笔迹」时再放回来）。
+    private func replaceInk(_ seg: InkSegment, ink: [PKStroke], with item: FunctionItem, isNew: Bool) {
         item.ink = ink
         item.inkIDs = seg.strokeIDs
         item.inkSourceIDs = seg.strokeIDs
-        apply(latex: latex, to: item)
-
-        // 笔迹淡出、式子淡入
         if let image = snapshot(of: ink, in: seg.bounds) {
             let ghost = InkGhost(image: image, frame: seg.bounds.insetBy(dx: -6, dy: -6))
             ghosts.append(ghost)
@@ -285,7 +269,7 @@ final class AppModel {
         // 先把这一项标成「显示式子」再收走笔迹，免得 drawingChanged 当它的笔迹被擦光了
         withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
             item.showingInk = false
-            if target == nil { functions.append(item) }
+            if isNew { functions.append(item) }
         }
         removeStrokes(Set(seg.strokeIDs))
     }
@@ -308,6 +292,7 @@ final class AppModel {
             item.definition = nil
             item.problem = Self.describe(error)
         }
+        recomputeDerivatives(of: item)
     }
 
     /// 函数卡片默认挂在式子右上角；贴边放不下时挪进屏幕，还是会压住式子就放到式子下面。
@@ -329,6 +314,15 @@ final class AppModel {
     func edit(_ item: FunctionItem, latex: String) {
         let tex = latex.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tex.isEmpty else { return }
+        // 改的是求导那一行（比如 f'(x) 改成 f''(x)）：重新求
+        if let request = DerivativeRequest.parse(tex), item.derivedFrom != nil || item.graph == nil {
+            if let parent = parentFunction(for: request, near: item.frame) {
+                withAnimation(.easeOut(duration: 0.2)) { setDerivative(item, request: request, parent: parent) }
+            } else {
+                toast("先写 \(request.name)(x) = …，再写 \(request.name)'(x)", at: CGPoint(x: item.frame.midX, y: item.frame.maxY + 26), .warning)
+            }
+            return
+        }
         withAnimation(.easeOut(duration: 0.2)) {
             item.latex = tex
             item.size = MathLabel.measure(tex, fontSize: item.fontSize)
@@ -359,7 +353,14 @@ final class AppModel {
     func delete(_ item: FunctionItem, keepInk: Bool = false) {
         if item.showingInk, !keepInk { removeStrokes(Set(item.inkIDs)) }
         if selection?.id == item.id { selection = nil }
-        withAnimation(.easeOut(duration: 0.2)) { functions.removeAll { $0.id == item.id } }
+        withAnimation(.easeOut(duration: 0.2)) {
+            functions.removeAll { $0.id == item.id }
+            // 删掉的是导数：这条函数没有别的导数了，图像里的导函数也收起来
+            if let p = item.derivedFrom, let parent = functions.first(where: { $0.id == p }),
+               !functions.contains(where: { $0.derivedFrom == p }) {
+                parent.graph?.reveal = false
+            }
+        }
     }
 
     /// 拖动式子：卡片一起走。
@@ -370,75 +371,89 @@ final class AppModel {
         item.card.center.y += d.height
     }
 
-    /// 卡片的滑条改了多项式系数：式子跟着重写。
+    /// 卡片的滑条改了多项式系数或参数：式子跟着重写，下面求出来的导数也跟着变。
     func coefficientsChanged(_ item: FunctionItem) {
         item.rewriteFromTerms()
+        recomputeDerivatives(of: item)
     }
 
-    // MARK: 推导
+    // MARK: 求导
 
-    private func checkDerivation(_ seg: InkSegment) {
-        let item = derivations.first { $0.id == seg.targetID }
-            ?? DerivationItem(lineID: nextLineID("D"), strokeIDs: Set(seg.strokeIDs), band: seg.bounds)
-        if !derivations.contains(where: { $0.id == item.id }) { derivations.append(item) }
-        item.strokeIDs = Set(seg.strokeIDs)
-        item.band = seg.bounds
-        item.revision += 1
-        item.annotation = nil
-        item.notice = nil
-        let revision = item.revision
-        let line = makeLine(item.lineID, revision: revision, mode: .derivative, seg)
-        let job = BusySegment(bounds: seg.bounds, kind: .derivation)
-        busy.append(job)
-        let png = PencilKitBridge.png(of: line, in: drawing, ids: &ids)
-        let recognizer = Self.makeRecognizer(strokes: seg.strokeIDs.compactMap { pkByID[$0] })
-        Task { @MainActor [weak self] in
-            defer { self?.busy.removeAll { $0.id == job.id } }
-            do {
-                let r = try await recognizer.recognize(line: line, imagePNG: png)
-                guard let self, item.revision == revision else { return }
-                self.grade(item, line: line, latex: r.latex.trimmingCharacters(in: .whitespacesAndNewlines))
-            } catch {
-                item.notice = "识别失败，点这里手动输入"
+    /// 学生在函数下面写了 f'(x)：找到上面那条 f(x) = …，直接把导函数求出来，换成标准式子（求出来的部分是绿的），
+    /// 并在 f 的图像里画出导函数、极值点和水平切线。等号后面学生写了什么都不看。
+    private func finishDerivative(_ seg: InkSegment, request: DerivativeRequest, result r: RecognitionResult,
+                                  target: FunctionItem?, lineID: String, revision: Int, ink: [PKStroke]) {
+        let below = CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24)
+        guard let parent = parentFunction(for: request, near: seg.bounds, excluding: target?.id) else {
+            toast("先写 \(request.name)(x) = …（双击后选「函数」），再写 \(request.name)'(x)", at: below, .warning)
+            return
+        }
+        // 还原笔迹改成了求导的那一项原来是一条函数：它的卡片不要了
+        if let target, target.derivedFrom == nil, target.graph != nil {
+            if functions.contains(where: { $0.derivedFrom == target.id }) {
+                toast("这一行原来是别的导数的来源，先删掉下面的导数再改", at: below, .warning)
+                return
+            }
+            delete(target, keepInk: true)
+        }
+        let reuse = target?.derivedFrom != nil ? target : nil
+        let fontSize = min(max(seg.bounds.height * 0.62, 24), 64)
+        let item = reuse ?? FunctionItem(lineID: lineID, latex: "", origin: .zero, fontSize: fontSize, size: .zero,
+                                         card: CardFrame(center: .zero, size: .zero, minimized: true), tint: Theme.ok)
+        item.revision = revision
+        item.fontSize = fontSize
+        item.engine = r.engine
+        item.ms = r.ms
+        setDerivative(item, request: request, parent: parent)
+        item.origin = CGPoint(x: seg.bounds.minX, y: seg.bounds.midY - item.size.height / 2)
+        replaceInk(seg, ink: ink, with: item, isNew: reuse == nil)
+    }
+
+    /// 对哪条函数求导：名字对得上的（大小写都认），写在这一行上面、离得最近的那条；没有就取最后写的那条。
+    private func parentFunction(for request: DerivativeRequest, near rect: CGRect, excluding: UUID? = nil) -> FunctionItem? {
+        let named = functions.filter { $0.derivedFrom == nil && $0.definition != nil && $0.id != excluding }
+        let exact = named.filter { $0.definition?.name == request.name }
+        let pool = exact.isEmpty ? named.filter { $0.definition?.name.lowercased() == request.name.lowercased() } : exact
+        let above = pool.filter { $0.frame.minY < rect.minY }
+        return above.max { $0.frame.minY < $1.frame.minY } ?? pool.last
+    }
+
+    /// 求出来写进这一项：f'(x) = 2x（f'(2) = 4 这种在一点取值的也行）。
+    private func setDerivative(_ item: FunctionItem, request: DerivativeRequest, parent: FunctionItem) {
+        guard let d = parent.definition else { return }
+        var body = d.body
+        for _ in 0..<request.order { body = body.derivative(d.variable) }
+        var named = request
+        named.name = d.name
+        let lhs = named.lhsLatex(variable: d.variable)
+        let rhs: String
+        if let p = request.point {
+            var env: [String: Double] = [:]
+            for param in parent.graph?.params ?? [] { env[param.name] = param.value }
+            env[d.variable] = p
+            rhs = MathExpr.formatNumber(body.evaluate(env))
+        } else {
+            rhs = body.latex
+        }
+        item.derivedFrom = parent.id
+        item.request = request
+        item.lhsLatex = lhs
+        item.resultLatex = rhs
+        item.latex = lhs + "=" + rhs
+        item.definition = FunctionDefinition(name: d.name + String(repeating: "'", count: request.order), variable: d.variable, body: body)
+        item.problem = nil
+        item.size = MathLabel.measure(item.displayLatex, fontSize: item.fontSize)
+        parent.graph?.reveal = true
+        if parent.card.minimized { parent.card.minimized = false }
+    }
+
+    /// 函数改了（重新识别、改式子、拖滑条）：下面求出来的导数跟着重新求。
+    private func recomputeDerivatives(of parent: FunctionItem) {
+        for child in functions where child.derivedFrom == parent.id {
+            if let request = child.request, parent.definition != nil {
+                setDerivative(child, request: request, parent: parent)
             }
         }
-    }
-
-    /// 点回显手动改：当成这一版的识别结果，立即重批。
-    func manualEdit(_ item: DerivationItem, latex: String) {
-        let s = strokes.filter { item.strokeIDs.contains($0.id) }
-        let line = InkLine(id: item.lineID, revision: item.revision, mode: .derivative, band: item.band,
-                           strokes: s, removedStrokeIDs: [])
-        grade(item, line: line, latex: latex.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
-    private func grade(_ item: DerivationItem, line: InkLine, latex: String) {
-        item.latex = latex.isEmpty ? nil : latex
-        item.checkedStrokes = item.strokeIDs
-        guard !latex.isEmpty else {
-            item.notice = "这一行没看清，点一下识别结果可以手动改"
-            return
-        }
-        guard LatexTerms.parse(latex).kind == .derivative else {
-            item.notice = "这一行要写成 f'(x) = … 才能批改"
-            return
-        }
-        // 对照的是写在它上面、离它最近的那条函数（没有就取最后一条）
-        let above = functions.filter { $0.definition != nil && $0.frame.minY < item.band.minY }
-        guard let f = above.max(by: { $0.frame.minY < $1.frame.minY }) ?? functions.last(where: { $0.definition != nil }) else {
-            item.notice = "先写一个函数（双击后选「函数」），再写它的导数"
-            return
-        }
-        guard let a = DerivativeCheck.annotation(line: line, functionLatex: f.latexForChecking, derivativeLatex: latex, mode: .direct) else {
-            item.notice = "这一行没看清，点一下识别结果可以手动改"
-            return
-        }
-        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-            item.annotation = a
-            item.notice = nil
-            f.graph?.reveal = a.ok
-        }
-        if a.ok, f.card.minimized { withAnimation(.spring) { f.card.minimized = false } }
     }
 
     // MARK: 几何
@@ -493,7 +508,6 @@ final class AppModel {
         selection = nil
         withAnimation(.easeOut(duration: 0.2)) {
             functions = []
-            derivations = []
             geometries = []
         }
         setDrawing(PKDrawing())
@@ -635,7 +649,10 @@ final class AppModel {
 // MARK: - 演示画面（CI 在模拟器上截图用）
 
 extension AppModel {
-    /// 启动参数 `-demo menu|card|reveal`：摆出黄金路径上的几个画面，不用真机也能看界面。识别结果直接给定，不走识别器。
+    /// 启动参数 `-demo menu|card|reveal`：摆出几个典型画面，不用真机也能看界面。识别结果直接给定，不走识别器。
+    /// - menu：写完 f(x)=x³−5x 双击，笔尖旁的菜单
+    /// - card：标准式子 + 选中的函数卡片（转了一点）+ 一条收起的函数
+    /// - reveal：f(x)=x²−4，下面写 f'(x) 求出来的 2x，卡片里画出导函数
     func loadDemo(_ name: String) {
         clear()
         let left: CGFloat = 120
@@ -645,33 +662,30 @@ extension AppModel {
             pencilDoubleTapped(at: CGPoint(x: ink.maxX + 18, y: ink.maxY - 4))
             return
         }
-        // 第一幕结束时的函数，已经收成标准式子
-        setDrawing(PKDrawing(strokes: DemoInk.strokes("f(x)=x^3-3x", at: CGPoint(x: left, y: 226), height: 54)))
+        let reveal = name == "reveal"
+        let text = reveal ? "f(x)=x^2-4" : "f(x)=x^3-3x"
+        setDrawing(PKDrawing(strokes: DemoInk.strokes(text, at: CGPoint(x: left, y: 226), height: 54)))
         guard let seg = segment(near: nil) else { return }
-        finishFunction(seg, result: RecognitionResult(lineID: "F1", revision: 1, latex: "f\\left( x\\right) =x^{3}-3x",
+        finishFunction(seg, result: RecognitionResult(lineID: "F1", revision: 1, latex: reveal ? "f\\left( x\\right) =x^{2}-4" : "f\\left( x\\right) =x^{3}-3x",
                                                       engine: "MyScript", ms: 164),
                        target: nil, lineID: nextLineID("F"), revision: 1, ink: seg.strokeIDs.compactMap { pkByID[$0] })
-        // 第二幕：导数那一行留着笔迹
-        let fixed = name == "reveal"
-        let derivative = fixed ? "f'(x)=3x^2-3" : "f'(x)=3x^2-3x"
-        var d = drawing
-        d.strokes.append(contentsOf: DemoInk.strokes(derivative, at: CGPoint(x: left, y: 470), height: 54,
-                                                     start: Date(timeIntervalSinceReferenceDate: 800_000_100)))
-        setDrawing(d)
-        if let seg2 = segment(near: nil) {
-            let item = DerivationItem(lineID: nextLineID("D"), strokeIDs: Set(seg2.strokeIDs), band: seg2.bounds)
-            item.revision = 1
-            derivations.append(item)
-            grade(item, line: makeLine(item.lineID, revision: 1, mode: .derivative, seg2), latex: derivative)
-        }
         guard let f = functions.first else { return }
-        if fixed {
+        if reveal {
+            // 在下面写 f'(x)，求出来
+            var d = drawing
+            d.strokes.append(contentsOf: DemoInk.strokes("f'(x)", at: CGPoint(x: left, y: 470), height: 54,
+                                                         start: Date(timeIntervalSinceReferenceDate: 800_000_100)))
+            setDrawing(d)
+            if let seg2 = segment(near: nil) {
+                finishDerivative(seg2, request: DerivativeRequest(name: "f", order: 1, variable: "x"),
+                                 result: RecognitionResult(lineID: "D1", revision: 1, latex: "f^{\\prime}\\left( x\\right)", engine: "MyScript", ms: 121),
+                                 target: nil, lineID: nextLineID("D"), revision: 1, ink: seg2.strokeIDs.compactMap { pkByID[$0] })
+            }
             // 顺便看橡皮选中、式子操作条的样子
             eraserOn = true
-            selection = .formula(f.id)
-            f.showsSliders = true
-            f.card.size = CGSize(width: 430, height: 380)
-            f.card.center = CGPoint(x: f.anchor.x + 24 + 215, y: max(f.anchor.y - 12 - 190, topInset + 200))
+            if let df = functions.first(where: { $0.derivedFrom != nil }) { selection = .formula(df.id) }
+            f.card.size = CGSize(width: 430, height: 330)
+            f.card.center = CGPoint(x: f.anchor.x + 24 + 215, y: max(f.anchor.y - 12 - 165, topInset + 175))
         } else {
             f.card.rotation = .degrees(-4)
             selection = .card(f.id)
