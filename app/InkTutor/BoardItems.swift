@@ -142,9 +142,9 @@ final class FunctionItem: Identifiable {
 
     var frame: CGRect { CGRect(origin: origin, size: size) }
 
-    /// 显示用的式子：求出来的那部分用绿色。
+    /// 显示用的式子：求出来的那部分用绿色（\color 会吃掉等号后面的间距，手动补一个 \;）。
     var displayLatex: String {
-        if let lhs = lhsLatex, let rhs = resultLatex { return lhs + "=\\color{#1E9E62}{" + rhs + "}" }
+        if let lhs = lhsLatex, let rhs = resultLatex { return lhs + "=\\;\\color{#1E9E62}{" + rhs + "}" }
         return latex
     }
     /// 卡片挂在式子的右上角。
