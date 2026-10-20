@@ -282,7 +282,7 @@ extension MathExpr {
     }
 
     /// 数字：整数照写；分母不超过 12 的分数写成 \frac；π 写成 \pi；其余保留 4 位有效数字。
-    static func formatNumber(_ n: Double) -> String {
+    public static func formatNumber(_ n: Double) -> String {
         guard n.isFinite else { return "\\text{?}" }
         if abs(n - n.rounded()) < 1e-9 { return String(Int(n.rounded())) }
         if abs(abs(n) - Double.pi) < 1e-12 { return n < 0 ? "-\\pi" : "\\pi" }
