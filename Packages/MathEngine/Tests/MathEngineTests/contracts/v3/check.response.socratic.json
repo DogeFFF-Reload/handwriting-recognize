@@ -1,0 +1,35 @@
+{
+  "checked" : {
+    "line_count" : 1,
+    "rhs_latex" : [
+      "3x^2-5x"
+    ]
+  },
+  "degraded" : [
+
+  ],
+  "engine" : "MathEngine (swift) 0.3.0",
+  "errors" : [
+    {
+      "bbox" : [
+        569.3538461538461,
+        336,
+        120.64615384615388,
+        44
+      ],
+      "bbox_source" : "term",
+      "char_span" : [
+        4,
+        7
+      ],
+      "hint_fallback" : "-5x 这一项对不上：先单独对它求一次导，会剩下什么？",
+      "kind" : "wrong_term",
+      "line_id" : "L2",
+      "wrong_latex" : "-5x"
+    }
+  ],
+  "feedback_mode" : "socratic",
+  "mode" : "derivative",
+  "ok" : false,
+  "replayed" : false
+}

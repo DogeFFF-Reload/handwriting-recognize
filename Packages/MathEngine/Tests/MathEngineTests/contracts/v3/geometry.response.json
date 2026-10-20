@@ -1,0 +1,77 @@
+{
+  "engine" : "MathEngine (swift) 0.3.0",
+  "ok" : true,
+  "replayed" : false,
+  "scene" : {
+    "degraded" : [
+
+    ],
+    "kind" : "geometry",
+    "objects" : [
+      {
+        "of" : [
+          "A",
+          "B"
+        ],
+        "type" : "segment"
+      },
+      {
+        "of" : [
+          "B",
+          "C"
+        ],
+        "type" : "segment"
+      },
+      {
+        "of" : [
+          "C",
+          "A"
+        ],
+        "type" : "segment"
+      },
+      {
+        "of" : [
+          "A",
+          "Ma"
+        ],
+        "type" : "segment"
+      }
+    ],
+    "points" : [
+      {
+        "free" : true,
+        "id" : "A",
+        "x" : 340,
+        "y" : 424
+      },
+      {
+        "free" : true,
+        "id" : "B",
+        "x" : 88,
+        "y" : 676
+      },
+      {
+        "free" : true,
+        "id" : "C",
+        "x" : 592,
+        "y" : 676
+      },
+      {
+        "free" : false,
+        "id" : "Ma",
+        "x" : 340,
+        "y" : 676
+      }
+    ],
+    "relations" : [
+      {
+        "of" : [
+          "B",
+          "C"
+        ],
+        "point" : "Ma",
+        "type" : "midpoint"
+      }
+    ]
+  }
+}
