@@ -36,9 +36,9 @@ swift run --package-path Packages/MathEngine p4tool parity \
 | `Annotation.explanation`（整行一个） | `errors[].explanation`（每条一个） | 桥取第一条 |
 | `kind`: `not_differentiated` / `wrong_coef` | `wrong_term` / `wrong_coefficient` / `wrong_sign` / `not_derivative` | 桥做映射 |
 
-桥在 `Integration/MathEngineGrading.swift`。**它不在 `Sources/` 下，不参与编译**——
-等 P3 决定把 `Packages/InkCore/Package.swift` 加上依赖后，再把它拷进 `InkCore/Sources/InkCore/`。
-在那之前，谁都不用动自己的包。
+桥在 `Packages/InkCore/Sources/InkCore/MathEngineGrading.swift`（`p4/integration` 分支）：InkCore 依赖 MathEngine，
+App 批改求导行走 `MathEngineGrading.annotation(...)`。P3 的临时 `DerivativeCheck` 先留着，真机跑通后由 P3 删。
+Server 的 `/check`、`/function`、`/geometry` 在 `Server/Sources/InkTutorServer/MathRoutes.swift`。
 
 ## 这一版做了什么
 
@@ -68,5 +68,4 @@ Sources/MathEngine/API.swift       契约 Codable 类型、MathEngineAPI 三个�
 Sources/MathEngine/Parity.swift    与 Python 参考实现对账
 Sources/p4tool/main.swift          命令行：contracts / parity / demo
 Tests/MathEngineTests/             43 个用例；golden_cases.json（48 条）+ contracts/（对账 19 条）
-Integration/MathEngineGrading.swift 给 InkCore 的接入样例（不参与编译）
 ```
