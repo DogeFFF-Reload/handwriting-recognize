@@ -11,7 +11,7 @@ struct InkOverlay: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Color.clear
+            Color.clear.allowsHitTesting(false)
             ForEach(app.lines.filter { !$0.strokes.isEmpty }) { line in
                 lineDecorations(line)
             }

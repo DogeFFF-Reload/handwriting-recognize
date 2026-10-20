@@ -9,3 +9,5 @@ P2、P3、P4 把源码推到自己的分支。`main` 只表示这一版已经在
 - 工程：`app/InkTutor.xcodeproj`
 
 `MyCertificate.c` 不进这个仓库。真机三项验证还没做，结果写在 [docs/device.md](docs/device.md)。
+
+P1 客户端已经接上 P2 的右半屏和 P3 的分行、门禁、批改。没填识别 Key 时走回放，前两幕不靠网络。模拟器编译通过。这一版还没装到 iPad 上，所以没有推到远端 `main`。

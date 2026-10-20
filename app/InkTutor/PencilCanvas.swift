@@ -45,6 +45,7 @@ struct PencilCanvas: UIViewRepresentable {
     final class Coordinator: NSObject, PKCanvasViewDelegate, UIPencilInteractionDelegate {
         var app: AppModel
         var clearToken = 0
+        private var loggedTap = false
 
         init(app: AppModel) {
             self.app = app
@@ -54,14 +55,40 @@ struct PencilCanvas: UIViewRepresentable {
             app.drawingChanged(canvasView.drawing)
         }
 
-        // iPadOS 17.5+：双击 = 确认
+        // iPadOS 17.5+：双击 = 确认。不执行系统的「切到橡皮」。
         func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
-            app.doubleTap()
+            let point = contentPoint(of: tap.hoverPose, in: interaction.view)
+            if !loggedTap {
+                loggedTap = true
+                let whereText = point.map { String(format: "(%.0f, %.0f)", $0.x, $0.y) } ?? "无落点"
+                print("[InkTutor] 双击 hoverPose=\(whereText) preferredTapAction=\(UIPencilInteraction.preferredTapAction)")
+            }
+            keepAppTool(on: interaction.view)
+            app.confirm(at: point)
+            DispatchQueue.main.async { [weak self] in
+                self?.keepAppTool(on: interaction.view)
+            }
         }
 
         // Pencil Pro 捏一下 = 切换笔/橡皮
         func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
-            if squeeze.phase == .ended { app.eraserOn.toggle() }
+            guard squeeze.phase == .ended else { return }
+            app.eraserOn.toggle()
+        }
+
+        private func keepAppTool(on view: UIView?) {
+            guard let canvas = view as? PKCanvasView else { return }
+            canvas.tool = PencilCanvas.tool(eraserOn: app.eraserOn)
+        }
+
+        /// hover 落在画布视图上。笔画坐标在内容坐标系，滚动画布时要加 contentOffset。
+        private func contentPoint(of pose: UIPencilHoverPose?, in view: UIView?) -> CGPoint? {
+            guard let pose, let canvas = view as? PKCanvasView else { return nil }
+            let zoom = max(canvas.zoomScale, 0.01)
+            return CGPoint(
+                x: (pose.location.x + canvas.contentOffset.x) / zoom,
+                y: (pose.location.y + canvas.contentOffset.y) / zoom
+            )
         }
     }
 }

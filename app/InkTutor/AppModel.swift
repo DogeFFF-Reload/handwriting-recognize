@@ -35,8 +35,13 @@ final class AppModel {
     @ObservationIgnored private var lastChangedLine: String?
 
     init() {
-        gate.expectedTermCount = { [weak self] _ in
-            self?.functionLatex.flatMap { DerivativeCheck.expectedTermCount(functionLatex: $0) }
+        gate.expectedTermCount = { [weak self] line in
+            guard line.mode == .derivative else { return nil }
+            if let n = self?.functionLatex.flatMap({ DerivativeCheck.expectedTermCount(functionLatex: $0) }) {
+                return n
+            }
+            // MathEngine 还没到、函数行也还没认出时，第二幕按 2 项触发。
+            return 2
         }
         gate.onRecognize = { [weak self] line, trigger in self?.recognize(line, trigger) }
         gate.onCheck = { [weak self] line, _ in self?.check(line) }
@@ -64,14 +69,29 @@ final class AppModel {
         }
     }
 
-    /// Pencil 双击 = 确认：函数模式立即刷新，推导模式立即批改，几何模式立即收成动态几何。
-    func doubleTap() {
-        guard let id = lastChangedLine ?? lines.last(where: { !$0.strokes.isEmpty })?.id else { return }
+    /// Pencil 双击 = 确认。有落点就选中那一行；没有落点就用最近改过的一行。
+    /// 函数模式立即刷新右半屏，推导模式立即批改，几何模式收成动态几何。
+    func confirm(at point: CGPoint?) {
+        guard let id = lineID(at: point) else { return }
         flashLine = id
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             if self?.flashLine == id { self?.flashLine = nil }
         }
         gate.doubleTapped(lineID: id)
+    }
+
+    /// 屏幕上的「确认」按钮：双击没进回调时用它顶上。
+    func doubleTap() { confirm(at: nil) }
+
+    private func lineID(at point: CGPoint?) -> String? {
+        let live = lines.filter { !$0.strokes.isEmpty }
+        if let point {
+            let hit = live.first {
+                $0.band.insetBy(dx: -28, dy: -28).contains(point)
+            }
+            if let hit { return hit.id }
+        }
+        return lastChangedLine ?? live.last?.id
     }
 
     func clear() {
@@ -93,7 +113,7 @@ final class AppModel {
         }
         guard let png = PencilKitBridge.png(of: line, in: drawing, ids: &ids) else { return }
         if echo[line.id] == nil { notices[line.id] = nil }
-        let recognizer = Self.makeRecognizer()
+        let recognizer = makeRecognizer()
         Task { @MainActor [weak self] in
             do {
                 let r = try await recognizer.recognize(line: line, imagePNG: png)
@@ -150,9 +170,7 @@ final class AppModel {
 
     // MARK: 识别引擎（设置页里选）
 
-    static let goldenReplay = ["f(x)=x^3-5x", "f(x)=x^3-3x", "f'(x)=3x^2-3x", "f'(x)=3x^2-3"]
-
-    static func makeRecognizer() -> InkRecognizer {
+    func makeRecognizer() -> InkRecognizer {
         let d = UserDefaults.standard
         let engine = d.string(forKey: "engine") ?? "auto"
         let key = (d.string(forKey: "dashscopeKey") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -160,13 +178,30 @@ final class AppModel {
         switch engine {
         case "direct" where !key.isEmpty: return DashScopeRecognizer(apiKey: key)
         case "server" where server?.host != nil: return ServerRecognizer(baseURL: server!)
-        case "replay": return replay
+        case "replay": return ScriptReplayRecognizer()
         default:
             if !key.isEmpty { return DashScopeRecognizer(apiKey: key) }
             if let s = server, s.host != nil { return ServerRecognizer(baseURL: s) }
-            return replay
+            return ScriptReplayRecognizer()
         }
     }
+}
 
-    private static let replay = ReplayRecognizer(sequence: goldenReplay)
+/// 没接识别引擎时按演示脚本回放，不靠停笔次数往下走。
+/// 一行还没擦过：函数幕是 x^3-5x，推导幕是写错的 3x^2-3x。
+/// 这一行出现过擦除：函数幕变成 x^3-3x，推导幕变成改对的 3x^2-3。
+struct ScriptReplayRecognizer: InkRecognizer {
+    func recognize(line: InkLine, imagePNG: Data?) async throws -> RecognitionResult {
+        let edited = !line.removedStrokeIDs.isEmpty
+        let latex: String
+        switch line.mode {
+        case .function:
+            latex = edited ? "f(x)=x^3-3x" : "f(x)=x^3-5x"
+        case .derivative:
+            latex = edited ? "f'(x)=3x^2-3" : "f'(x)=3x^2-3x"
+        case .geometry:
+            latex = ""
+        }
+        return RecognitionResult(lineID: line.id, revision: line.revision, latex: latex, engine: "replay", ms: 0)
+    }
 }

@@ -6,6 +6,9 @@ struct ContentView: View {
     @State private var app = AppModel()
     @State private var showSettings = false
     @AppStorage("allowFinger") private var allowFinger = false
+    @AppStorage("engine") private var engine = "auto"
+    @AppStorage("dashscopeKey") private var dashscopeKey = ""
+    @AppStorage("serverURL") private var serverURL = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,6 +33,12 @@ struct ContentView: View {
                 Spacer()
                 Button("清空", role: .destructive) { app.clear() }
                     .buttonStyle(.bordered)
+                Text(engineLabel)
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(engineLabel == "回放" ? Color.orange.opacity(0.18) : Color.green.opacity(0.18),
+                                in: Capsule())
                 Button {
                     showSettings = true
                 } label: {
@@ -51,6 +60,21 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) { SettingsView() }
+    }
+
+    /// 和设置页同一套选择。没填 Key、也没填 Server 时就是回放，前两幕不靠网络。
+    private var engineLabel: String {
+        let key = dashscopeKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let server = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch engine {
+        case "direct": return key.isEmpty ? "回放" : "百炼"
+        case "server": return server.isEmpty ? "回放" : "Server"
+        case "replay": return "回放"
+        default:
+            if !key.isEmpty { return "百炼" }
+            if !server.isEmpty { return "Server" }
+            return "回放"
+        }
     }
 }
 
@@ -90,7 +114,7 @@ struct SettingsView: View {
                         Text("回放（断网）").tag("replay")
                     }
                 } footer: {
-                    Text("自动：填了 Key 就直连百炼；否则用 Server；都没有就放录好的黄金路径。")
+                    Text("自动：填了 Key 就直连百炼；否则用 Server；都没有就回放。回放不看笔迹内容：函数行先当作 x^3-5x，这一行擦过之后当作 x^3-3x；推导行先当作 3x^2-3x，擦过之后当作 3x^2-3。")
                 }
                 Section("直连百炼") {
                     SecureField("DashScope API Key（只存在这台 iPad 上）", text: $key)
