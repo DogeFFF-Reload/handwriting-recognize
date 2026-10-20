@@ -88,9 +88,11 @@ actor RecognizeReplay {
         tracker.observe(lineID: up.lineID, mode: up.mode, strokeIDs: up.strokes.map(\.id))
     }
 
-    func replayed(_ p: ReplayTracker.Position) -> String? {
+    /// `wholeLine`：App 双击确认后才发识别（trigger = double_tap），这一段已经写完，放这一轮的最后一步。
+    func replayed(_ p: ReplayTracker.Position, wholeLine: Bool = false) -> String? {
         ReplayScript.golden.overlaid(with: recorded)
-            .latex(mode: p.mode, ordinal: p.ordinal, erasePasses: p.erasePasses, strokesInPass: p.strokesInPass)
+            .latex(mode: p.mode, ordinal: p.ordinal, erasePasses: p.erasePasses, strokesInPass: p.strokesInPass,
+                   wholeLine: wholeLine)
     }
 
     /// 只在 record 模式下录；空结果不录，免得盖掉好的一步。
@@ -108,9 +110,10 @@ actor RecognizeReplay {
 func recognizeWithReplay(_ replay: RecognizeReplay, upload: UploadRequest, timeout: Double = 3,
                          live: @escaping @Sendable () async throws -> String) async throws -> (String, Bool) {
     let p = await replay.position(of: upload)
+    let whole = upload.trigger == .doubleTap
     switch replay.mode {
     case .play:
-        if let r = await replay.replayed(p) { return (r, true) }
+        if let r = await replay.replayed(p, wholeLine: whole) { return (r, true) }
         throw ReplayError.nothingRecorded("recognize")
     case .off, .record:
         let r = try await live()
@@ -120,7 +123,7 @@ func recognizeWithReplay(_ replay: RecognizeReplay, upload: UploadRequest, timeo
         do {
             return (try await withTimeout(timeout, live), false)
         } catch {
-            if let r = await replay.replayed(p) { return (r, true) }
+            if let r = await replay.replayed(p, wholeLine: whole) { return (r, true) }
             throw error
         }
     }

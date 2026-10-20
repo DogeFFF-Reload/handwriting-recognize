@@ -27,6 +27,30 @@ public let recognitionPrompt = """
 图里没有字或只是涂改的痕迹，就输出 {"latex": ""}。
 """
 
+/// 按顺序试几个识别器：前一个抛错或给了空结果就换下一个，最后一个的空结果照样返回（界面说「没认出来」）。
+/// 例如 MyScript（设备上）→ 百炼 → Server。
+public struct FallbackRecognizer: InkRecognizer {
+    public var chain: [InkRecognizer]
+
+    public init(_ chain: [InkRecognizer]) {
+        self.chain = chain
+    }
+
+    public func recognize(line: InkLine, imagePNG: Data?) async throws -> RecognitionResult {
+        var lastError: Error = RecognizerError.badResponse("没有可用的识别器")
+        for (k, r) in chain.enumerated() {
+            do {
+                let result = try await r.recognize(line: line, imagePNG: imagePNG)
+                if !result.latex.isEmpty || k == chain.count - 1 { return result }
+                lastError = RecognizerError.badResponse("空结果")
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+}
+
 /// 从模型回复里取出 {"latex": ...}。
 public func extractLatex(fromModelReply text: String) throws -> String {
     guard let start = text.firstIndex(of: "{"), let end = text.lastIndex(of: "}"), start < end,

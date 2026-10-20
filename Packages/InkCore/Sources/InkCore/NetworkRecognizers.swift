@@ -5,15 +5,18 @@ import Foundation
 public struct ServerRecognizer: InkRecognizer {
     public var baseURL: URL
     public var session: URLSession
+    /// 为什么识别：停顿（.pause）还是学生双击确认这一段写完了（.doubleTap，Server 回放时按整行放）。
+    public var trigger: CheckTrigger
 
-    public init(baseURL: URL, session: URLSession = .shared) {
+    public init(baseURL: URL, session: URLSession = .shared, trigger: CheckTrigger = .pause) {
         self.baseURL = baseURL
         self.session = session
+        self.trigger = trigger
     }
 
     public func recognize(line: InkLine, imagePNG: Data?) async throws -> RecognitionResult {
         guard let png = imagePNG else { throw RecognizerError.noImage }
-        let body = UploadRequest(line: line, trigger: .pause, imageBase64: png.base64EncodedString())
+        let body = UploadRequest(line: line, trigger: trigger, imageBase64: png.base64EncodedString())
         var req = URLRequest(url: baseURL.appendingPathComponent("recognize"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

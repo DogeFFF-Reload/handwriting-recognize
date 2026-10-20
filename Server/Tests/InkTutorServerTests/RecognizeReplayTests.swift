@@ -34,6 +34,18 @@ final class RecognizeReplayTests: XCTestCase {
         XCTAssertEqual([half, fixed], ["f(x)=x^3-x", "f(x)=x^3-3x"])
     }
 
+    /// App 双击确认后才识别（trigger = double_tap）：写法和估的笔数不同，也放整行。
+    func testDoubleTapPlaysTheWholeLine() async throws {
+        let replay = RecognizeReplay(mode: .play, directory: tempDir())
+        var up = upload("F1", .function, (1...12).map { "s\($0)" })
+        up.trigger = .doubleTap
+        let r = try await recognizeWithReplay(replay, upload: up) {
+            XCTFail("play 不联网")
+            return ""
+        }.0
+        XCTAssertEqual(r, "f(x)=x^3-5x")
+    }
+
     func testRecordedResultsReplaceTheBuiltInLine() async throws {
         let dir = tempDir()
         let rec = RecognizeReplay(mode: .record, directory: dir)

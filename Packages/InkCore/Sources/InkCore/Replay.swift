@@ -49,12 +49,16 @@ public struct ReplayScript: Codable, Equatable {
 
     /// 这一行在这个状态下该放的 LaTeX。笔画还不够第一步时是空串（当作「没看清」，不会提前批改）。
     /// 第 n 行没录过就用这一模式里最近的前一行（清屏后行号接着往上数，也能对上）。这一模式完全没录过时返回 nil。
-    public func latex(mode: InkMode, ordinal: Int, erasePasses: Int, strokesInPass: Int) -> String? {
+    /// `wholeLine`：这一段已经由学生双击确认写完了，这一轮写过笔就放这一轮的最后一步，不再按笔画数猜写到哪儿。
+    public func latex(mode: InkMode, ordinal: Int, erasePasses: Int, strokesInPass: Int, wholeLine: Bool = false) -> String? {
         let prefix = "\(mode.rawValue)/"
         let recorded = lines.keys.compactMap { k -> Int? in k.hasPrefix(prefix) ? Int(k.dropFirst(prefix.count)) : nil }
         guard let n = recorded.filter({ $0 <= ordinal }).max(),
               let passes = lines[Self.key(mode: mode, ordinal: n)], !passes.isEmpty else { return nil }
         let pass = passes.filter { $0.erasePasses <= erasePasses }.max { $0.erasePasses < $1.erasePasses } ?? passes[0]
+        if wholeLine, strokesInPass > 0, let last = pass.steps.max(by: { $0.minStrokes < $1.minStrokes }) {
+            return last.latex
+        }
         let step = pass.steps.filter { $0.minStrokes <= strokesInPass }.max { $0.minStrokes < $1.minStrokes }
         return step?.latex ?? ""
     }
@@ -195,15 +199,19 @@ public final class ReplayTracker: @unchecked Sendable {
 public struct ReplayRecognizer: InkRecognizer {
     public var script: ReplayScript
     public let tracker: ReplayTracker
+    /// 只在学生双击确认之后才识别（App 现在的做法）时打开：见 `ReplayScript.latex(wholeLine:)`。
+    public var wholeLine: Bool
 
-    public init(script: ReplayScript = .golden, tracker: ReplayTracker = ReplayTracker()) {
+    public init(script: ReplayScript = .golden, tracker: ReplayTracker = ReplayTracker(), wholeLine: Bool = false) {
         self.script = script
         self.tracker = tracker
+        self.wholeLine = wholeLine
     }
 
     public func recognize(line: InkLine, imagePNG: Data?) async throws -> RecognitionResult {
         let p = tracker.observe(lineID: line.id, mode: line.mode, strokeIDs: line.strokes.map(\.id))
-        let latex = script.latex(mode: p.mode, ordinal: p.ordinal, erasePasses: p.erasePasses, strokesInPass: p.strokesInPass) ?? ""
+        let latex = script.latex(mode: p.mode, ordinal: p.ordinal, erasePasses: p.erasePasses, strokesInPass: p.strokesInPass,
+                                 wholeLine: wholeLine) ?? ""
         return RecognitionResult(lineID: line.id, revision: line.revision, latex: latex, engine: "replay", ms: 0)
     }
 }
