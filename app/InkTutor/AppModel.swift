@@ -48,6 +48,8 @@ final class AppModel {
     @ObservationIgnored private var lineNumbers: [String: Int] = [:]
 
     init() {
+        // 装机时从控制台就能看出 MyScript 缺不缺证书 / 资源（xcrun devicectl … --console）
+        print("[InkTutor] MyScript: \(MyScriptMath.shared.status.summary)")
         MyScriptMath.shared.warmUp()
     }
 
