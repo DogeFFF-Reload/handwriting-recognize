@@ -15,6 +15,9 @@ jobs:
     container: swift:6.0
     steps:
       - uses: actions/checkout@v4
+      - name: MathEngine tests
+        if: hashFiles('Packages/MathEngine/Package.swift') != ''
+        run: swift test --package-path Packages/MathEngine
       - name: InkCore tests
         if: hashFiles('Packages/InkCore/Tests/**') != ''
         run: swift test --package-path Packages/InkCore

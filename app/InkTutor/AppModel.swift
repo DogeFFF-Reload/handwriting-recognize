@@ -429,7 +429,7 @@ final class AppModel {
             item.notice = "先写一个函数（双击后选「函数」），再写它的导数"
             return
         }
-        guard let a = DerivativeCheck.annotation(line: line, functionLatex: f.latexForChecking, derivativeLatex: latex, mode: .direct) else {
+        guard let a = MathEngineGrading.annotation(line: line, functionLatex: f.latexForChecking, derivativeLatex: latex, mode: .direct) else {
             item.notice = "这一行没看清，点一下识别结果可以手动改"
             return
         }

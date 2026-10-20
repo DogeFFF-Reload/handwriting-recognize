@@ -49,6 +49,7 @@ func configure(_ app: Application, model: ModelClient? = nil) throws {
     let recognizeReplay = RecognizeReplay(mode: mode, directory: replayDir)
     let book = HintBook()
     app.logger.notice("回放模式：\(mode.rawValue)")
+    registerMathRoutes(app, book: book)
 
     app.get("health") { _ in "ok" }
 

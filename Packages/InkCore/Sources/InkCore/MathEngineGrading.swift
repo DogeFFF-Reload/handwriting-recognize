@@ -1,24 +1,8 @@
 //
 //  MathEngineGrading.swift
-//  —— 这份文件**不参与编译**（不在 Sources/ 下），是给 P3 的接入样例。
-//  放的位置：团队仓库的 `Packages/MathEngine/Integration/`。
-//
-//  作用：把 MathEngine 的判分结果翻译成 InkCore 的 `Annotation`（契约类型）。
-//  为什么要这一层：契约（`Packages/InkCore/Sources/InkCore/Contracts.swift`）是四个人共用的，
-//  不能因为换引擎就改字段。差异只有三处，全部在这里消化：
-//    ① `bbox`：[x1,y1,x2,y2] ↔ MathEngine 的 `Box(x,y,w,h)`
-//    ② 说明：整行一个 ↔ MathEngine 每条错误一个（取第一条）
-//    ③ 错误码：`not_differentiated` / `wrong_coef` ↔ `wrong_term` / `wrong_coefficient`
-//  **判分逻辑一行都不在这里**，这里只做翻译。
-//
-//  接入（P3 决定何时合）：
-//   1) `Packages/InkCore/Package.swift` 加
-//        dependencies: [.package(path: "../MathEngine")]
-//        .target(name: "InkCore", dependencies: [.product(name: "MathEngine", package: "MathEngine")])
-//   2) 本文件拷到 `Packages/InkCore/Sources/InkCore/`，删掉这段注释。
-//   3) App 里 `DerivativeCheck.annotation(...)` → `MathEngineGrading.annotation(...)`；
-//      `CheckGate.expectedTermCount` → `{ _ in MathEngineGrading.expectedTermCount(functionLatex: …) }`。
-//   4) 全绿之后再删 InkCore 里的临时 `DerivativeCheck.swift`（P3 的文件，P3 删）。
+//  把 MathEngine（P4）的判分结果翻译成 InkCore 的 `Annotation`。判分逻辑一行都不在这里。
+//  差异只有三处：bbox 的写法、说明是整行一条还是每个错误一条、错误码的名字。
+//  App 批改求导行走这里；临时的 `DerivativeCheck` 保留到真机跑通再删（P3 删）。
 //
 
 #if canImport(CoreGraphics)
