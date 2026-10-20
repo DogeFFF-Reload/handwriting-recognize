@@ -36,8 +36,8 @@ final class AppModel {
     private(set) var canRedo = false
     /// 画板大小（ContentView 量好了告诉这里，用来把卡片摆在屏幕里）。
     var boardSize: CGSize = CGSize(width: 1180, height: 820)
-    /// 顶上工具栏占掉的高度，卡片不往那里放。
-    let topInset: CGFloat = 76
+    /// 顶上工具栏占掉的高度（状态栏 24 + 上边距 8 + 胶囊 52 + 留白），卡片和菜单不往那里放。
+    let topInset: CGFloat = 100
 
     @ObservationIgnored private weak var canvas: PKCanvasView?
     @ObservationIgnored private var drawing = PKDrawing()
