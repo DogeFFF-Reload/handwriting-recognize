@@ -52,7 +52,7 @@ func registerMathRoutes(_ app: Application, book: HintBook) {
     }
     func body(_ req: Request) throws -> Data {
         guard let buf = req.body.data else { throw Abort(.badRequest, reason: "空请求") }
-        return Data(buffer: buf)
+        return Data(buf.readableBytesView)
     }
 
     app.post("check") { req async throws -> Response in
