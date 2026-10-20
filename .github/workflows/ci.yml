@@ -1,12 +1,12 @@
-# 只有一台 Mac 能编译，所以 P2/P3/P4 的分支在云端先过一遍：
+# 只有一台 Mac 能编译，所以 P1/P2/P3/P4 的分支在云端先过一遍：
 # - unit：Linux 上跑 InkCore 的单元测试（便宜、快）
-# - ios-build：macOS 上用 xcodebuild 把整个 App 编成 iOS 模拟器版（不签名）。
+# - ios-build：macOS 上用 xcodebuild 把整个 App 编成 iOS 模拟器版（不签名，连 MyScript iink SDK 一起编）。
 #   macOS 分钟数按 10 倍计费，只在 commit 信息带 [mac] 或手动触发时跑。
 name: ci
 
 on:
   push:
-    branches: ["p2/**", "p3/**", "p4/**", "demo/**"]
+    branches: ["p1/**", "p2/**", "p3/**", "p4/**", "demo/**"]
   workflow_dispatch:
 
 jobs:
@@ -35,10 +35,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Xcode version
         run: xcodebuild -version
+      # MyScript 的 iink 包从 api.github.com 下载 130 MB 的二进制：带上 token，免得共享 IP 被限流
+      - name: Token for SwiftPM binary downloads
+        run: |
+          printf 'machine api.github.com\n  login x-access-token\n  password %s\n' "${{ github.token }}" > ~/.netrc
+          chmod 600 ~/.netrc
       - name: Build app for iOS Simulator
         run: |
           xcodebuild -project app/InkTutor.xcodeproj -scheme InkTutor \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 || true
-          grep -E "error:|BUILD (SUCCEEDED|FAILED)" build.log | sed -E 's#/Users/runner/work/[^ ]*/(Packages|app)/#\1/#' | sort -u | head -80
+          grep -E "error:|BUILD (SUCCEEDED|FAILED)|iink SDK 没有编进来" build.log | sed -E 's#/Users/runner/work/[^ ]*/(Packages|app)/#\1/#' | sort -u | head -80
           grep -q "BUILD SUCCEEDED" build.log

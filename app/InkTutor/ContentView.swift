@@ -2,6 +2,7 @@ import InkCore
 import SceneUI
 import SwiftUI
 
+/// 整屏一张纸。顶上浮着工具栏；不再分左右半屏，函数图像是挂在式子右上角的卡片。
 struct ContentView: View {
     @State private var app = AppModel()
     @State private var showSettings = false
@@ -11,87 +12,53 @@ struct ContentView: View {
     @AppStorage("serverURL") private var serverURL = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Picker("模式", selection: $app.mode) {
-                    Text("函数").tag(InkMode.function)
-                    Text("推导").tag(InkMode.derivative)
-                    Text("几何").tag(InkMode.geometry)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 360)
-                Button {
-                    app.eraserOn.toggle()
-                } label: {
-                    Label(app.eraserOn ? "橡皮" : "笔", systemImage: app.eraserOn ? "eraser" : "pencil.tip")
-                        .frame(minWidth: 72)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(app.eraserOn ? .orange : .accentColor)
-                Button("双击确认") { app.doubleTap() }
-                    .buttonStyle(.bordered)
-                Spacer()
-                Button("清空", role: .destructive) { app.clear() }
-                    .buttonStyle(.bordered)
-                Text(engineLabel)
-                    .font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(engineLabel == "回放" ? Color.orange.opacity(0.18) : Color.green.opacity(0.18),
-                                in: Capsule())
-                Button {
-                    showSettings = true
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-                .buttonStyle(.bordered)
-            }
-            .padding(12)
-            HStack(spacing: 0) {
+        ZStack(alignment: .top) {
+            GeometryReader { geo in
                 ZStack(alignment: .topLeading) {
-                    RuledPaper()
-                    PencilCanvas(app: app, eraserOn: app.eraserOn, allowFinger: allowFinger)
-                    InkOverlay(app: app)
+                    PaperBackground()
+                    PencilCanvas(app: app, eraserOn: app.eraserOn, penColor: app.penColor, penWidth: app.penWidth,
+                                 allowFinger: allowFinger)
+                    if !app.hasInk, app.functions.isEmpty, app.geometries.isEmpty {
+                        EmptyBoardHint()
+                            .position(x: geo.size.width / 2, y: geo.size.height * 0.46)
+                            .transition(.opacity)
+                    }
+                    BoardOverlay(app: app)
                 }
-                .clipped()
-                Divider()
-                SceneHost(model: app.scene)
-                    .frame(maxWidth: .infinity)
+                .coordinateSpace(name: Board.space)
+                .onAppear { app.boardSize = geo.size }
+                .onChange(of: geo.size) { _, s in app.boardSize = s }
             }
-        }
-        .sheet(isPresented: $showSettings) { SettingsView() }
-    }
+            .ignoresSafeArea()
 
-    /// 和设置页同一套选择。没填 Key、也没填 Server 时就是回放，前两幕不靠网络。
-    private var engineLabel: String {
-        let key = dashscopeKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let server = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        switch engine {
-        case "direct": return key.isEmpty ? "回放" : "百炼"
-        case "server": return server.isEmpty ? "回放" : "Server"
-        case "replay": return "回放"
-        default:
-            if !key.isEmpty { return "百炼" }
-            if !server.isEmpty { return "Server" }
-            return "回放"
+            TopBar(app: app, engine: AppModel.engineLabel(pref: engine, key: dashscopeKey, server: serverURL)) {
+                showSettings = true
+            }
+            .padding(.top, 8)
         }
+        .animation(.easeOut(duration: 0.25), value: app.hasInk)
+        .sheet(isPresented: $showSettings) { SettingsView() }
     }
 }
 
-/// 横线纸：只是书写引导，分行由 InkModel 按笔迹自己算。
-struct RuledPaper: View {
+/// 横线纸，左边一道淡红的页边线。只是书写引导，分段由笔迹自己算。
+struct PaperBackground: View {
     var body: some View {
         Canvas { ctx, size in
-            var y: CGFloat = 110
-            var p = Path()
+            var rules = Path()
+            var y: CGFloat = 132
             while y < size.height {
-                p.move(to: CGPoint(x: 0, y: y))
-                p.addLine(to: CGPoint(x: size.width, y: y))
-                y += 110
+                rules.move(to: CGPoint(x: 0, y: y))
+                rules.addLine(to: CGPoint(x: size.width, y: y))
+                y += 76
             }
-            ctx.stroke(p, with: .color(.blue.opacity(0.12)), lineWidth: 1)
+            ctx.stroke(rules, with: .color(Theme.rule), lineWidth: 1)
+            var margin = Path()
+            margin.move(to: CGPoint(x: 64, y: 0))
+            margin.addLine(to: CGPoint(x: 64, y: size.height))
+            ctx.stroke(margin, with: .color(Theme.margin), lineWidth: 1)
         }
-        .background(Color(.systemBackground))
+        .background(Theme.paper)
         .allowsHitTesting(false)
     }
 }
@@ -109,13 +76,27 @@ struct SettingsView: View {
             Form {
                 Section {
                     Picker("识别引擎", selection: $engine) {
-                        Text("自动").tag("auto")
+                        Text("自动（MyScript 优先）").tag("auto")
+                        Text("MyScript（设备上）").tag("myscript")
                         Text("直连百炼（Qwen）").tag("direct")
                         Text("Mac 上的 Server").tag("server")
                         Text("回放（断网）").tag("replay")
                     }
                 } footer: {
-                    Text("自动：填了 Key 就直连百炼；否则用 Server；都没有就回放。回放不看笔迹内容：函数行先当作 x^3-5x，这一行擦过之后当作 x^3-3x；推导行先当作 3x^2-3x，擦过之后当作 3x^2-3。")
+                    Text("自动：MyScript 就绪就用它（设备上识别，不联网），认不出时再试百炼和 Server；都没有就回放。"
+                         + "回放不看笔迹内容：第一条函数先当作 x^3-5x，改过笔迹之后当作 x^3-3x；推导行先当作 3x^2-3x，改过之后当作 3x^2-3。")
+                }
+                Section {
+                    LabeledContent("状态") {
+                        Text(MyScriptMath.shared.status.summary)
+                            .foregroundStyle(MyScriptMath.shared.status.isReady ? Theme.ok : Theme.warn)
+                            .multilineTextAlignment(.trailing)
+                    }
+                } header: {
+                    Text("MyScript iink · Math Recognizer")
+                } footer: {
+                    Text("证书和识别资源都不进仓库：MyCertificate.c 放进 app/InkTutor/MyScriptCertificate/；"
+                         + "数学识别资源在 Mac 上编译时自动下载到 app/MyScript/（也可以手动运行 tools/myscript/fetch-assets.sh）。")
                 }
                 Section("直连百炼") {
                     SecureField("DashScope API Key（只存在这台 iPad 上）", text: $key)
@@ -132,11 +113,13 @@ struct SettingsView: View {
                     Toggle("录制回放（彩排时打开）", isOn: $recordReplay)
                     Button("清除录好的回放", role: .destructive) { AppModel.replayRecorder.clear() }
                 } footer: {
-                    Text("打开后，真识别的结果按「第几行、擦过几轮、这一轮写了几笔」记下来，断网或选「回放」时照着放。"
-                         + "演示的人按真实写法把黄金路径走一遍就行；没录过的行用内置的。")
+                    Text("打开后，真识别的结果按「第几条、改过几轮、这一轮写了几笔」记下来，断网或选「回放」时照着放。"
+                         + "演示的人按真实写法把黄金路径走一遍就行；没录过的用内置的。")
                 }
                 Section {
                     Toggle("允许手指书写（没有 Pencil 时测试用）", isOn: $allowFinger)
+                } footer: {
+                    Text("Pencil 双击 = 这一段写完了；Pencil Pro 捏一下 = 切换笔和橡皮。双击没反应时点工具栏上的「完成一段」。")
                 }
             }
             .navigationTitle("设置")

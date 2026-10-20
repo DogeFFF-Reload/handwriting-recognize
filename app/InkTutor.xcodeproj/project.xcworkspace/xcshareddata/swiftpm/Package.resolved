@@ -2,6 +2,15 @@
   "originHash" : "4b3bda00403c374d3453fa718f97aefb024cced4fd42d438ea5d0497619fa0e5",
   "pins" : [
     {
+      "identity" : "interactive-ink-packages-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/MyScript/interactive-ink-packages-ios",
+      "state" : {
+        "revision" : "32d82e1500f093caf7632d7f40e83d710fc09ac8",
+        "version" : "4.5.1"
+      }
+    },
+    {
       "identity" : "swiftmath",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mgriebling/SwiftMath.git",
