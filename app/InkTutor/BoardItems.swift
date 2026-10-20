@@ -5,15 +5,16 @@ import SceneUI
 import SwiftUI
 
 /// 双击笔身后在笔尖旁选的三种处理。
+/// 「求解」把求导、积分、极限、求和、解方程合在一起：写的是什么就算什么（f'(x)、\int_0^2 f(x)dx、\lim…、\sum…、x^2-4=0）。
 enum SegmentKind: String, CaseIterable, Identifiable {
-    case function, derivative, geometry
+    case function, solve, geometry
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .function: return "函数"
-        case .derivative: return "求导"
+        case .solve: return "求解"
         case .geometry: return "几何"
         }
     }
@@ -21,7 +22,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
     var hint: String {
         switch self {
         case .function: return "收成标准式子并作图"
-        case .derivative: return "直接求出导函数"
+        case .solve: return "求导、积分、极限、求和、解方程，直接算出结果"
         case .geometry: return "收成动态几何"
         }
     }
@@ -29,7 +30,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
     var mode: InkMode {
         switch self {
         case .function: return .function
-        case .derivative: return .derivative
+        case .solve: return .derivative   // 回放脚本里求导那几行记在 derivative 下
         case .geometry: return .geometry
         }
     }
@@ -96,6 +97,7 @@ struct Toast: Identifiable, Equatable {
 
 /// 一条函数：标准式子（换掉了手写笔迹）+ 右上角的函数卡片。
 /// 求出来的导数也是一条（derivedFrom 指向原函数），只有式子，没有自己的卡片：导函数画在原函数的卡片里。
+/// 「求解」算出来的也是一条（solution 不为 nil），只有式子：∫_a^b f、lim f 标在 f 的卡片里。
 @Observable
 final class FunctionItem: Identifiable {
     let id = UUID()
@@ -129,6 +131,9 @@ final class FunctionItem: Identifiable {
     var request: DerivativeRequest?
     var lhsLatex: String?
     var resultLatex: String?
+    /// 「求解」：学生写的那一行（引用的函数改了就拿它重新算）和算出来的结果。
+    var solveSource: String?
+    var solution: Solution?
 
     init(lineID: String, latex: String, origin: CGPoint, fontSize: CGFloat, size: CGSize, card: CardFrame, tint: Color) {
         self.lineID = lineID
@@ -144,9 +149,17 @@ final class FunctionItem: Identifiable {
 
     /// 显示用的式子：求出来的那部分用绿色（\color 会吃掉等号后面的间距，手动补一个 \;）。
     var displayLatex: String {
+        if let s = solution {
+            guard let r = s.result else { return s.input }
+            let rel = s.relation == "\\Rightarrow" ? "\\;\\Rightarrow\\;" : s.relation
+            return s.input + rel + "\\;\\color{#1E9E62}{" + r + "}"
+        }
         if let lhs = lhsLatex, let rhs = resultLatex { return lhs + "=\\;\\color{#1E9E62}{" + rhs + "}" }
         return latex
     }
+
+    /// 算出来的（导数或求解），不是学生定义的函数。
+    var isComputed: Bool { derivedFrom != nil || solution != nil }
     /// 卡片挂在式子的右上角。
     var anchor: CGPoint { CGPoint(x: frame.maxX, y: frame.minY) }
     var name: String { definition?.name ?? "f" }

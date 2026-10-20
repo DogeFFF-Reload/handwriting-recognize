@@ -102,6 +102,27 @@ public struct GraphSpecialPoint: Equatable, Identifiable {
     }
 }
 
+/// 「求解」标在这条函数图像上的东西：定积分涂出来的面积、极限的那个点（空心）。
+public struct GraphOverlay: Equatable, Identifiable {
+    public enum Kind: Equatable {
+        /// ∫_a^b f(x)dx：曲线和 x 轴之间 a 到 b 这一块（a、b 可以是 ±∞）。
+        case area(from: Double, to: Double)
+        /// lim_{x→a} f(x) = L。
+        case point(x: Double, y: Double)
+    }
+    /// 是哪一条求解标的（App 用那一项的 id），重算、删除时按它换掉。
+    public var id: String
+    public var kind: Kind
+    /// 写在旁边的字：S = −16/3、极限 5。
+    public var label: String
+
+    public init(id: String, kind: Kind, label: String) {
+        self.id = id
+        self.kind = kind
+        self.label = label
+    }
+}
+
 @Observable
 public final class GraphModel {
     public enum Source {
@@ -123,6 +144,23 @@ public final class GraphModel {
     public private(set) var revision = 0
     /// 系数滑条的范围 ±sliderSpan：按识别出来时的系数定，拖动时不跟着变，免得滑块在手指下跑。
     public private(set) var sliderSpan: Double = 5
+    /// 求解标上的面积、点。
+    public private(set) var overlays: [GraphOverlay] = []
+
+    /// 换上（或加上）一条标注；新的标注落在视窗外时重新取景。
+    public func setOverlay(_ o: GraphOverlay) {
+        if let i = overlays.firstIndex(where: { $0.id == o.id }) {
+            guard overlays[i] != o else { return }
+            overlays[i] = o
+        } else {
+            overlays.append(o)
+        }
+        viewport = nil
+    }
+
+    public func removeOverlay(id: String) {
+        overlays.removeAll { $0.id == id }
+    }
 
     public init(polynomial terms: [PolyTerm]) {
         source = .polynomial(terms)
@@ -204,6 +242,19 @@ public final class GraphModel {
                 let mid = (lo + hi) / 2
                 xMin = mid - 4
                 xMax = mid + 4
+            }
+        }
+        // 积分区间、极限的点也要在视窗里
+        for o in overlays {
+            switch o.kind {
+            case .area(let a, let b):
+                let lo = a.isFinite ? a : (b.isFinite ? b - 6 : -6), hi = b.isFinite ? b : lo + 6
+                let pad = max(0.8, (hi - lo) * 0.25)
+                xMin = min(xMin, lo - pad)
+                xMax = max(xMax, hi + pad)
+            case .point(let x, _):
+                xMin = min(xMin, x - 1.5)
+                xMax = max(xMax, x + 1.5)
             }
         }
         // 纵向：极值的大小优先；没有极值时按曲线在中间 60% 的取值（指数函数不会把整条线压扁在 x 轴上）

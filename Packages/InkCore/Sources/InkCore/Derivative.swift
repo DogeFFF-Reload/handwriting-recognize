@@ -69,6 +69,22 @@ extension MathExpr {
             default: return .number(.nan)
             }
             return .multiply(outer, du)
+        case .limit:
+            return depends(on: v) ? .number(.nan) : .number(0)
+        case .integral(let t, let lower, let upper, let body):
+            guard let lower, let upper else {
+                // d/dx ∫ f(x) dx = f(x)
+                return t == v ? body : .integral(t, nil, nil, body.d(v))
+            }
+            // 变限积分（微积分基本定理 + 含参积分求导）
+            var r: MathExpr = .subtract(.multiply(body.substituting(t, with: upper), upper.d(v)),
+                                        .multiply(body.substituting(t, with: lower), lower.d(v)))
+            if t != v, body.depends(on: v) { r = .add(r, .integral(t, lower, upper, body.d(v))) }
+            return r
+        case .series(let k, let lower, let upper, let body, let product):
+            if !depends(on: v) { return .number(0) }
+            guard !product, k != v, !lower.depends(on: v), !upper.depends(on: v) else { return .number(.nan) }
+            return .series(k, lower, upper, body.d(v), false)
         }
     }
 
@@ -135,6 +151,9 @@ extension MathExpr {
             if case .negate(let nb) = b { return .add(a, nb) }
             if let y = b.constantValue, y < 0 { return .add(a, .number(-y)) }
             if a == b { return .number(0) }
+            // 去括号：a − (b − c) = a − b + c，a − (b + c) = a − b − c
+            if case .subtract(let p, let q) = b { return .add(.subtract(a, p), q) }
+            if case .add(let p, let q) = b { return .subtract(.subtract(a, p), q) }
             return .subtract(a, b)
         case .multiply(let a0, let b0):
             let a = a0.simplified(v), b = b0.simplified(v)
@@ -146,6 +165,9 @@ extension MathExpr {
             if b.constantValue == -1 { return .negate(a) }
             if case .negate(let na) = a { return .negate(.multiply(na, b)) }
             if case .negate(let nb) = b { return .negate(.multiply(a, nb)) }
+            // 乘一个分母含 x 的分式：并成一个分式（\frac{2x}{x^2+1}，而不是 2\frac{1}{x^2+1}x）
+            if case .divide(let n, let d) = b, d.depends(on: v) { return .divide(.multiply(a, n), d) }
+            if case .divide(let n, let d) = a, d.depends(on: v) { return .divide(.multiply(n, b), d) }
             // 常数放前面，并和前面的常数合并：c·(d·u) = (cd)·u
             if b.constantValue != nil, a.constantValue == nil { return .multiply(b, a) }
             if let x = a.constantValue, case .multiply(let c, let rest) = b, let y = c.constantValue {
@@ -166,7 +188,7 @@ extension MathExpr {
             return .multiply(a, b)
         case .divide(let a0, let b0):
             let a = a0.simplified(v)
-            // 分母是 (…)^n 时不展开：-rac{2}{(x-1)^2}，而不是 x^2 - 2x + 1
+            // 分母是 (…)^n 时不展开：-\frac{2}{(x-1)^2}，而不是 x^2 - 2x + 1
             let b: MathExpr
             if case .power(let base, let n) = b0, n.constantValue != nil, base.depends(on: v) {
                 b = .power(base.simplified(v), n)
@@ -198,12 +220,20 @@ extension MathExpr {
         case .call(let name, let args):
             let s = args.map { $0.simplified(v) }
             if name == "ln", s.count == 1, s[0] == .symbol("e") { return .number(1) }
+            if ["ln", "lg", "log"].contains(name), s.last?.constantValue == 1 { return .number(0) }
+            if name == "ln", s.count == 1, case .power(.symbol("e"), let k) = s[0] { return k }
             if name == "exp", s.count == 1 { return .power(.symbol("e"), s[0]) }
             if s.allSatisfy({ $0.constantValue != nil }), name != "ln", name != "log", name != "lg" {
                 let value = MathExpr.apply(name, s.compactMap(\.constantValue))
                 if value.isFinite, abs(value - value.rounded()) < 1e-12 { return .number(value.rounded()) }
             }
             return .call(name, s)
+        case .limit(let t, let point, let side, let body):
+            return .limit(t, point.simplified(v), side, body.simplified(t))
+        case .integral(let t, let lower, let upper, let body):
+            return .integral(t, lower?.simplified(v), upper?.simplified(v), body.simplified(t))
+        case .series(let k, let lower, let upper, let body, let product):
+            return .series(k, lower.simplified(v), upper.simplified(v), body.simplified(k), product)
         }
     }
 
@@ -219,7 +249,7 @@ extension MathExpr {
             let s = MathExpr.formatNumber(n)
             return n < 0 && context > 0 ? "(\(s))" : s
         case .symbol(let s):
-            return s
+            return s == "π" ? "\\pi" : s
         case .negate(let a):
             let inner = "-" + a.latex(context: 1)
             return context > 0 ? "(\(inner))" : inner
@@ -252,7 +282,7 @@ extension MathExpr {
             let base: String
             switch a {
             case .number(let n) where n >= 0: base = MathExpr.formatNumber(n)
-            case .symbol(let s): base = s
+            case .symbol: base = a.latex(context: 2)
             case .call(let name, _) where name == "sqrt" || name == "abs": base = a.latex(context: 2)
             default: base = "(" + a.latex(context: 0) + ")"
             }
@@ -264,8 +294,27 @@ extension MathExpr {
             case "abs": return "\\left|\(args.last?.latex(context: 0) ?? "")\\right|"
             case "exp": return "e^{\(args.last?.latex(context: 0) ?? "")}"
             case "log" where args.count == 2: return "\\log_{\(args[0].latex(context: 0))}" + MathExpr.argument(args[1])
+            case "factorial":
+                let a = args.last ?? .number(.nan)
+                switch a {
+                case .symbol, .number: return a.latex(context: 2) + "!"
+                default: return "(" + a.latex(context: 0) + ")!"
+                }
             default: return "\\\(name)" + MathExpr.argument(args.last ?? .number(.nan))
             }
+        case .limit(let t, let point, let side, let body):
+            let sup = side > 0 ? "^{+}" : side < 0 ? "^{-}" : ""
+            let s = "\\lim_{\(t) \\to \(point.latex(context: 0))\(sup)} " + body.latex(context: 1)
+            return context == 2 ? "(\(s))" : s
+        case .integral(let t, let lower, let upper, let body):
+            var s = "\\int"
+            if let lower, let upper { s += "_{\(lower.latex(context: 0))}^{\(upper.latex(context: 0))}" }
+            s += " " + body.latex(context: 1) + " \\, d" + t
+            return context > 0 ? "(\(s))" : s
+        case .series(let k, let lower, let upper, let body, let product):
+            let s = (product ? "\\prod" : "\\sum") + "_{\(k)=\(lower.latex(context: 0))}^{\(upper.latex(context: 0))} "
+                + body.latex(context: 1)
+            return context > 0 ? "(\(s))" : s
         }
     }
 
@@ -274,15 +323,36 @@ extension MathExpr {
 
     /// 函数名后面的参数：单个字母或数字不加括号（\sin x），其余加（\sin(2x)）。
     static func argument(_ u: MathExpr) -> String {
+        // 系数分母都一样的一次式写成一个分式：\arctan\frac{x + 1}{2}，而不是 \arctan(\frac{1}{2}x + \frac{1}{2})
+        if u.symbols.count == 1, let s = u.symbols.first, let p = u.polynomial(in: s), p.count >= 2,
+           let q = commonDenominator(Array(p.values)) {
+            return "\\frac{" + fromPolynomial(p.mapValues { $0 * Double(q) }, s).latex + "}{\(q)}"
+        }
         switch u {
-        case .symbol(let s): return " " + s
+        case .symbol: return " " + u.latex(context: 2)
+        case .call("abs", _): return u.latex(context: 0)
         case .number(let n) where n >= 0: return " " + formatNumber(n)
         default: return "(" + u.latex(context: 0) + ")"
         }
     }
 
+    /// 几个系数化成最简分数后分母都是同一个 q（≥ 2）时返回 q。
+    static func commonDenominator(_ cs: [Double]) -> Int? {
+        var common: Int?
+        for c in cs {
+            guard let q = (2...12).first(where: { q in
+                let p = c * Double(q)
+                return abs(p - p.rounded()) < 1e-9 && Int(abs(p.rounded())) % q != 0
+            }) else { return nil }
+            guard common == nil || common == q else { return nil }
+            common = q
+        }
+        return common
+    }
+
     /// 数字：整数照写；分母不超过 12 的分数写成 \frac；π 写成 \pi；其余保留 4 位有效数字。
     public static func formatNumber(_ n: Double) -> String {
+        if n.isInfinite { return n > 0 ? "\\infty" : "-\\infty" }
         guard n.isFinite else { return "\\text{?}" }
         if abs(n - n.rounded()) < 1e-9 { return String(Int(n.rounded())) }
         if abs(abs(n) - Double.pi) < 1e-12 { return n < 0 ? "-\\pi" : "\\pi" }

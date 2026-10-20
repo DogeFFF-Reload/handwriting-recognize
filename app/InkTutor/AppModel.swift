@@ -7,9 +7,11 @@ import SwiftUI
 /// 整块画板的状态。
 ///
 /// 全局规则：先只显示原始墨迹；学生写完一段，双击 Pencil Pro 表示这一段输入完了，
-/// 笔尖旁弹出「函数 / 求导 / 几何」。选「函数」时用 MyScript iink 的 Math Recognizer 把这段笔迹收成 LaTeX，
+/// 笔尖旁弹出「函数 / 求解 / 几何」。选「函数」时用 MyScript iink 的 Math Recognizer 把这段笔迹收成 LaTeX，
 /// 手写笔迹换成标准式子，式子右上角挂一张可以移动、缩放、旋转、收起的函数卡片。
-/// 在函数下面写 f'(x)，双击后选「求导」（选「函数」也行），App 直接把导函数求出来写上，图像里画出导函数。
+/// 「求解」把写下的式子直接算出来：在函数下面写 f'(x) 求导（图像里画出导函数），写 \int_0^2 f(x)dx、
+/// \lim_{x\to 3} f(x)、\sum_{k=1}^{n} k^2、x^2-4=0，或者一个不引用函数的完整式子，都直接给出结果；
+/// 积分和极限顺便标在 f 的图像上。选「函数」时写的其实是要算的东西，也会转去求解。
 /// 几何沿用 P3 的草图识别，触发方式统一成双击后选。
 ///
 /// 所有回调都在主线程：PencilKit 回调、Pencil 双击、识别结果用 MainActor 切回来。
@@ -178,17 +180,18 @@ final class AppModel {
         // 还原了笔迹的式子改成画几何：原来那一项不要了（笔迹留着）
         if kind == .geometry, let t = seg.targetID, let f = functions.first(where: { $0.id == t }) { delete(f, keepInk: true) }
         switch kind {
-        case .function, .derivative: recognizeMath(seg, kind)
+        case .function, .solve: recognizeMath(seg, kind)
         case .geometry: buildGeometry(seg)
         }
     }
 
     // MARK: 函数
 
-    /// 函数和求导走同一条路：认出来是 f'(x) 就求导，是 f(x) = … 就作图，和菜单里选的是哪一项无关。
+    /// 函数和求解走同一条路：认出来是 f'(x) 就求导；是极限、积分、求和、方程、算式（或者选的就是「求解」）就算出来；
+    /// 是 f(x) = … 就作图。
     private func recognizeMath(_ seg: InkSegment, _ kind: SegmentKind) {
         let target = functions.first { $0.id == seg.targetID }
-        let lineID = target?.lineID ?? nextLineID(kind == .derivative ? "D" : "F")
+        let lineID = target?.lineID ?? nextLineID(kind == .solve ? "D" : "F")
         let revision = (target?.revision ?? 0) + 1
         target?.revision = revision
         let line = makeLine(lineID, revision: revision, mode: kind.mode, seg)
@@ -201,7 +204,7 @@ final class AppModel {
             defer { self?.busy.removeAll { $0.id == job.id } }
             do {
                 let r = try await recognizer.recognize(line: line, imagePNG: png)
-                self?.finishFunction(seg, result: r, target: target, lineID: lineID, revision: revision, ink: pk)
+                self?.finishFunction(seg, result: r, target: target, lineID: lineID, revision: revision, ink: pk, kind: kind)
             } catch {
                 self?.toast("没认出来：\(AppModel.describe(error))", at: CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24), .warning)
             }
@@ -209,7 +212,7 @@ final class AppModel {
     }
 
     private func finishFunction(_ seg: InkSegment, result r: RecognitionResult, target: FunctionItem?,
-                                lineID: String, revision: Int, ink: [PKStroke]) {
+                                lineID: String, revision: Int, ink: [PKStroke], kind: SegmentKind = .function) {
         if let target, target.revision != revision { return }   // 又确认了一次，这次的结果过期了
         let below = CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24)
         guard seg.strokeIDs.allSatisfy({ pkByID[$0] != nil }) else {
@@ -225,9 +228,16 @@ final class AppModel {
             finishDerivative(seg, request: request, result: r, target: target, lineID: lineID, revision: revision, ink: ink)
             return
         }
-        // 原来是求导的那一项，改写成了普通的函数：当作一条新函数
-        if let target, target.derivedFrom != nil { delete(target, keepInk: true) }
-        let reuse = target?.derivedFrom == nil ? target : nil
+        let table = functionTable(excluding: target?.id)
+        if kind == .solve || Solver.looksLikeComputation(latex, functions: table) {
+            if finishSolve(seg, latex: latex, result: r, target: target, lineID: lineID, revision: revision, ink: ink, functions: table) {
+                return
+            }
+            // 选了「求解」，写的却是一条普通函数：照常作图
+        }
+        // 原来是算出来的那一项（导数、求解），改写成了普通的函数：当作一条新函数
+        if let target, target.isComputed { delete(target, keepInk: true) }
+        let reuse = (target?.isComputed ?? true) ? nil : target
 
         // 标准式子放在原来那行笔迹的位置：左对齐，竖直居中，字号跟着手写的大小走
         let fontSize = min(max(seg.bounds.height * 0.62, 24), 64)
@@ -245,13 +255,15 @@ final class AppModel {
             let frame = CGRect(origin: origin, size: size)
             item = FunctionItem(lineID: lineID, latex: latex, origin: origin, fontSize: fontSize, size: size,
                                 card: placeCard(next: frame, size: CGSize(width: 360, height: 252)),
-                                tint: Theme.curve(functions.filter { $0.derivedFrom == nil }.count))
+                                tint: Theme.curve(functions.filter { !$0.isComputed }.count))
             item.revision = revision
         }
         item.engine = r.engine
         item.ms = r.ms
         apply(latex: latex, to: item)
         replaceInk(seg, ink: ink, with: item, isNew: reuse == nil)
+        // 新函数加进来之后，之前写的、当时还找不到它的求解再算一次
+        if reuse == nil { recomputeSolutions(using: item.name) }
     }
 
     /// 笔迹淡出、式子淡入，然后把这段笔迹从画布上收走（「改笔迹」时再放回来）。
@@ -274,10 +286,10 @@ final class AppModel {
         removeStrokes(Set(seg.strokeIDs))
     }
 
-    /// 解析式子、建或换函数图像。
+    /// 解析式子、建或换函数图像。右边可以用前面写过的函数：g(x) = f(x) + 1。
     private func apply(latex: String, to item: FunctionItem) {
         do {
-            let d = try FunctionDefinition.parse(latex)
+            let d = try FunctionDefinition.parse(latex, functions: functionTable(excluding: item.id))
             item.definition = d
             item.problem = nil
             let graph: GraphModel
@@ -293,6 +305,7 @@ final class AppModel {
             item.problem = Self.describe(error)
         }
         recomputeDerivatives(of: item)
+        recomputeSolutions(using: item.name)
     }
 
     /// 函数卡片默认挂在式子右上角；贴边放不下时挪进屏幕，还是会压住式子就放到式子下面。
@@ -323,6 +336,23 @@ final class AppModel {
             }
             return
         }
+        // 求解那一行改了，或者把一条函数改成了要算的式子：重新算
+        let table = functionTable(excluding: item.id)
+        if item.solveSource != nil || Solver.looksLikeComputation(tex, functions: table) {
+            let outcome: Result<Solution?, Error> = Result { try Solver.solve(tex, functions: table) }
+            if case .success(.none) = outcome {
+                // 改成了一条普通函数
+                if item.solveSource != nil { convertToFunction(item, latex: tex) ; return }
+            } else {
+                guard let target = item.solveSource != nil ? item : convertToComputed(item) else { return }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    target.solveSource = tex
+                    target.engine = "手动"
+                    setSolution(target, outcome.map { $0! })
+                }
+                return
+            }
+        }
         withAnimation(.easeOut(duration: 0.2)) {
             item.latex = tex
             item.size = MathLabel.measure(tex, fontSize: item.fontSize)
@@ -340,7 +370,8 @@ final class AppModel {
         setDrawing(d)
         item.inkIDs = item.inkSourceIDs
         withAnimation(.easeOut(duration: 0.2)) { item.showingInk = true }
-        toast("改完后双击笔身，选「函数」重新识别", at: CGPoint(x: item.frame.midX, y: item.frame.maxY + 26), .info)
+        toast("改完后双击笔身，选「\(item.isComputed ? "求解" : "函数")」重新识别",
+              at: CGPoint(x: item.frame.midX, y: item.frame.maxY + 26), .info)
     }
 
     /// 改笔迹改到一半不想改了：笔迹收走，式子回来。
@@ -360,7 +391,11 @@ final class AppModel {
                !functions.contains(where: { $0.derivedFrom == p }) {
                 parent.graph?.reveal = false
             }
+            // 删掉的是求解：标在图像上的面积、点也去掉
+            for f in functions { f.graph?.removeOverlay(id: item.id.uuidString) }
         }
+        // 删掉的是函数：用到它的求解重新算（会提示它没有了）
+        if !item.isComputed { recomputeSolutions(using: item.name) }
     }
 
     /// 拖动式子：卡片一起走。
@@ -375,6 +410,7 @@ final class AppModel {
     func coefficientsChanged(_ item: FunctionItem) {
         item.rewriteFromTerms()
         recomputeDerivatives(of: item)
+        recomputeSolutions(using: item.name)
     }
 
     // MARK: 求导
@@ -396,6 +432,8 @@ final class AppModel {
             }
             delete(target, keepInk: true)
         }
+        // 原来是一条求解，改写成了 f'(x)
+        if let target, target.solveSource != nil { delete(target, keepInk: true) }
         let reuse = target?.derivedFrom != nil ? target : nil
         let fontSize = min(max(seg.bounds.height * 0.62, 24), 64)
         let item = reuse ?? FunctionItem(lineID: lineID, latex: "", origin: .zero, fontSize: fontSize, size: .zero,
@@ -435,6 +473,8 @@ final class AppModel {
         } else {
             rhs = body.latex
         }
+        item.solveSource = nil
+        item.solution = nil
         item.derivedFrom = parent.id
         item.request = request
         item.lhsLatex = lhs
@@ -453,6 +493,182 @@ final class AppModel {
             if let request = child.request, parent.definition != nil {
                 setDerivative(child, request: request, parent: parent)
             }
+        }
+    }
+
+    // MARK: 求解
+
+    /// 画板上已经写过的函数（按名字，后写的算数），滑条上的参数取当前值：求解里的 f(x)、f'(2) 用它。
+    private func functionTable(excluding id: UUID? = nil) -> [String: FunctionDefinition] {
+        var table: [String: FunctionDefinition] = [:]
+        for f in functions where !f.isComputed && f.id != id {
+            guard var d = f.definition else { continue }
+            for p in f.graph?.params ?? [] { d.body = d.body.substituting(p.name, with: .number(p.value)) }
+            d.parameters = d.body.symbols.subtracting([d.variable]).sorted()
+            table[d.name] = d
+        }
+        return table
+    }
+
+    /// 写的是要算的东西：算出来，换成标准式子（结果是绿的）。返回 false：其实是一条普通函数，交给作图。
+    private func finishSolve(_ seg: InkSegment, latex: String, result r: RecognitionResult, target: FunctionItem?,
+                             lineID: String, revision: Int, ink: [PKStroke], functions table: [String: FunctionDefinition]) -> Bool {
+        let outcome: Result<Solution, Error>
+        do {
+            guard let s = try Solver.solve(latex, functions: table) else { return false }
+            outcome = .success(s)
+        } catch {
+            outcome = .failure(error)
+        }
+        let below = CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24)
+        // 还原笔迹改成了要算的式子的那一项原来是一条函数：它的卡片不要了
+        if let target, !target.isComputed {
+            if !dependents(of: target).isEmpty {
+                toast("下面还有用到 \(target.name)(x) 的式子，先删掉它们再改", at: below, .warning)
+                return true
+            }
+            delete(target, keepInk: true)
+        }
+        if let target, target.derivedFrom != nil { delete(target, keepInk: true) }
+        let reuse = target?.solveSource != nil ? target : nil
+        let fontSize = min(max(seg.bounds.height * 0.62, 24), 64)
+        let item = reuse ?? FunctionItem(lineID: lineID, latex: latex, origin: .zero, fontSize: fontSize, size: .zero,
+                                         card: CardFrame(center: .zero, size: .zero, minimized: true), tint: Theme.ok)
+        item.revision = revision
+        item.fontSize = fontSize
+        item.engine = r.engine
+        item.ms = r.ms
+        item.solveSource = latex
+        setSolution(item, outcome)
+        item.origin = CGPoint(x: seg.bounds.minX, y: seg.bounds.midY - item.size.height / 2)
+        replaceInk(seg, ink: ink, with: item, isNew: reuse == nil)
+        return true
+    }
+
+    /// 把算出来的结果写进这一项，图像上的标注跟着换。
+    private func setSolution(_ item: FunctionItem, _ outcome: Result<Solution, Error>) {
+        item.derivedFrom = nil
+        item.request = nil
+        item.lhsLatex = nil
+        item.resultLatex = nil
+        item.definition = nil
+        switch outcome {
+        case .success(let s):
+            item.solution = s
+            item.problem = nil
+            item.latex = s.input
+        case .failure(let e):
+            item.solution = nil
+            item.problem = Self.describe(e)
+            item.latex = item.solveSource ?? item.latex
+        }
+        item.size = MathLabel.measure(item.displayLatex, fontSize: item.fontSize)
+        updateOverlay(for: item)
+    }
+
+    /// ∫_a^b f(x)dx 在 f 的图像上涂出面积，lim_{x→a} f(x) 标出那一点。
+    private func updateOverlay(for item: FunctionItem) {
+        let key = item.id.uuidString
+        for f in functions { f.graph?.removeOverlay(id: key) }
+        guard let s = item.solution, let hint = s.hint else { return }
+        let value = s.result.map(Solver.plainText) ?? ""
+        var name = "", kind = GraphOverlay.Kind.point(x: 0, y: 0), label = ""
+        switch hint {
+        case .area(let fn, let a, let b):
+            name = fn
+            kind = .area(from: a, to: b)
+            label = "∫ = " + value
+        case .point(let fn, let x, let y):
+            name = fn
+            kind = .point(x: x, y: y)
+            label = "lim = " + value
+        }
+        guard let parent = functions.last(where: { !$0.isComputed && $0.definition?.name == name }), let graph = parent.graph else { return }
+        graph.setOverlay(GraphOverlay(id: key, kind: kind, label: label))
+        if parent.card.minimized { parent.card.minimized = false }
+    }
+
+    /// 用到 name 这条函数的求解（以及上次没算成的）重新算。
+    private func recomputeSolutions(using name: String?) {
+        for item in functions where item.solveSource != nil {
+            guard let src = item.solveSource else { continue }
+            let uses = name.map { item.solution?.references.contains($0) ?? false } ?? true
+            guard uses || item.solution == nil || item.solution?.result == nil else { continue }
+            let table = functionTable(excluding: item.id)
+            let outcome: Result<Solution, Error>
+            do {
+                // 这一行现在看起来像一条函数定义（f(x) = 0 里的 f 删掉了）
+                guard let s = try Solver.solve(src, functions: table) else {
+                    setSolution(item, .failure(MissingFunction()))
+                    continue
+                }
+                outcome = .success(s)
+            } catch {
+                outcome = .failure(error)
+            }
+            setSolution(item, outcome)
+        }
+    }
+
+    /// 用到这条函数的式子：求出来的导数、求解里引用了它的。
+    private func dependents(of f: FunctionItem) -> [FunctionItem] {
+        functions.filter { $0.derivedFrom == f.id || ($0.solution?.references.contains(f.name) ?? false) }
+    }
+
+    /// 手动把一条函数改成了要算的式子：换成一条求解（卡片不要了）。下面有用到它的式子时不改。
+    private func convertToComputed(_ item: FunctionItem) -> FunctionItem? {
+        if !dependents(of: item).isEmpty {
+            toast("下面还有用到 \(item.name)(x) 的式子，先删掉它们再改", at: CGPoint(x: item.frame.midX, y: item.frame.maxY + 26), .warning)
+            return nil
+        }
+        let new = FunctionItem(lineID: item.lineID, latex: item.latex, origin: item.origin, fontSize: item.fontSize, size: item.size,
+                               card: CardFrame(center: .zero, size: .zero, minimized: true), tint: Theme.ok)
+        replaceItem(item, with: new)
+        return new
+    }
+
+    /// 手动把一条求解改成了普通函数：换成一条带卡片的函数。
+    private func convertToFunction(_ item: FunctionItem, latex: String) {
+        let size = MathLabel.measure(latex, fontSize: item.fontSize)
+        let frame = CGRect(origin: item.origin, size: size)
+        let new = FunctionItem(lineID: item.lineID, latex: latex, origin: item.origin, fontSize: item.fontSize, size: size,
+                               card: placeCard(next: frame, size: CGSize(width: 360, height: 252)),
+                               tint: Theme.curve(functions.filter { !$0.isComputed }.count))
+        withAnimation(.easeOut(duration: 0.2)) {
+            replaceItem(item, with: new)
+            new.engine = "手动"
+            apply(latex: latex, to: new)
+        }
+    }
+
+    /// 原地换掉一项（笔迹跟着走），图像上它的标注去掉。
+    private func replaceItem(_ old: FunctionItem, with new: FunctionItem) {
+        new.ink = old.ink
+        new.inkSourceIDs = old.inkSourceIDs
+        new.engine = old.engine
+        new.ms = old.ms
+        for f in functions { f.graph?.removeOverlay(id: old.id.uuidString) }
+        if let i = functions.firstIndex(where: { $0.id == old.id }) { functions[i] = new } else { functions.append(new) }
+        if selection?.id == old.id { selection = .formula(new.id) }
+        // 换掉的是导数：原函数没有别的导数了，导函数收起来
+        if let p = old.derivedFrom, let parent = functions.first(where: { $0.id == p }),
+           !functions.contains(where: { $0.derivedFrom == p }) {
+            parent.graph?.reveal = false
+        }
+    }
+
+    private struct MissingFunction: LocalizedError {
+        var errorDescription: String? { "用到的函数已经删掉了" }
+    }
+
+    static func operationTitle(_ op: Solution.Operation) -> String {
+        switch op {
+        case .derivative: return "求导"
+        case .integral: return "积分"
+        case .limit: return "求极限"
+        case .series: return "求和"
+        case .equation: return "解方程"
+        case .evaluate: return "计算"
         }
     }
 
@@ -649,11 +865,16 @@ final class AppModel {
 // MARK: - 演示画面（CI 在模拟器上截图用）
 
 extension AppModel {
-    /// 启动参数 `-demo menu|card|reveal`：摆出几个典型画面，不用真机也能看界面。识别结果直接给定，不走识别器。
+    /// 启动参数 `-demo menu|card|reveal|solve`：摆出几个典型画面，不用真机也能看界面。识别结果直接给定，不走识别器。
     /// - menu：写完 f(x)=x³−5x 双击，笔尖旁的菜单
     /// - card：标准式子 + 选中的函数卡片（转了一点）+ 一条收起的函数
     /// - reveal：f(x)=x²−4，下面写 f'(x) 求出来的 2x，卡片里画出导函数
+    /// - solve：f(x)=x²−4，下面写 ∫_0^2 f(x)dx（卡片里涂出面积）、lim_{x→0} sin x / x、∑_{k=1}^n k²，选「求解」
     func loadDemo(_ name: String) {
+        if name == "solve" {
+            loadSolveDemo()
+            return
+        }
         clear()
         let left: CGFloat = 120
         if name == "menu" {
@@ -697,5 +918,33 @@ extension AppModel {
             apply(latex: g.latex, to: g)
             functions.append(g)
         }
+    }
+
+    private func loadSolveDemo() {
+        clear()
+        let left: CGFloat = 120
+        setDrawing(PKDrawing(strokes: DemoInk.strokes("f(x)=x^2-4", at: CGPoint(x: left, y: 200), height: 50)))
+        guard let seg = segment(near: nil) else { return }
+        finishFunction(seg, result: RecognitionResult(lineID: "F1", revision: 1, latex: "f\\left( x\\right) =x^{2}-4", engine: "MyScript", ms: 152),
+                       target: nil, lineID: nextLineID("F"), revision: 1, ink: seg.strokeIDs.compactMap { pkByID[$0] })
+        guard let f = functions.first else { return }
+        // 笔迹只是占位（马上换成标准式子），识别结果直接给定
+        let lines: [(ink: String, latex: String, y: CGFloat)] = [
+            ("∫f(x)dx", "\\int _{0}^{2}f\\left( x\\right) dx", 390),
+            ("x-2", "\\lim _{x\\rightarrow 0}\\dfrac{\\sin x}{x}", 520),
+            ("2x", "\\sum _{k=1}^{n}k^{2}", 650),
+        ]
+        for (i, line) in lines.enumerated() {
+            var d = drawing
+            d.strokes.append(contentsOf: DemoInk.strokes(line.ink, at: CGPoint(x: left, y: line.y), height: 46,
+                                                         start: Date(timeIntervalSinceReferenceDate: 800_000_100 + Double(i) * 60)))
+            setDrawing(d)
+            guard let s = segment(near: nil) else { continue }
+            finishFunction(s, result: RecognitionResult(lineID: "D\(i + 1)", revision: 1, latex: line.latex, engine: "MyScript", ms: 138 + i * 11),
+                           target: nil, lineID: nextLineID("D"), revision: 1, ink: s.strokeIDs.compactMap { pkByID[$0] }, kind: .solve)
+        }
+        if let integral = functions.first(where: { $0.solution?.operation == .integral }) { selection = .formula(integral.id) }
+        f.card.size = CGSize(width: 430, height: 330)
+        f.card.center = CGPoint(x: max(f.anchor.x, 640) + 24 + 215, y: max(f.anchor.y - 12 - 165, topInset + 175))
     }
 }

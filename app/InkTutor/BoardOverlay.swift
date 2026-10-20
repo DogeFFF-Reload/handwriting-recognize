@@ -63,7 +63,7 @@ struct FormulaView: View {
             // 笔迹放回画布了：提示改完怎么办
             HStack(spacing: 10) {
                 Image(systemName: "scribble.variable").foregroundStyle(Theme.accent)
-                Text("改好笔迹后双击笔身，选「函数」").font(.footnote)
+                Text("改好笔迹后双击笔身，选「\(item.isComputed ? "求解" : "函数")」").font(.footnote)
                 Button("取消") { app.cancelInk(item) }
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Theme.accent)
@@ -109,30 +109,46 @@ struct FormulaView: View {
             )
             .overlay(alignment: .bottomLeading) {
                 if let problem = item.problem {
-                    Label("无法作图：\(problem)", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(Theme.warn)
-                        .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(Theme.warn.opacity(0.1), in: Capsule())
-                        .fixedSize()
-                        .offset(y: 30)
+                    chip(item.solveSource != nil ? "无法计算：\(problem)" : "无法作图：\(problem)",
+                         icon: "exclamationmark.triangle.fill", tint: Theme.warn)
                         .onTapGesture { app.editingFormula = item.id }
+                } else if let s = item.solution, let note = s.note {
+                    if s.result != nil {
+                        // 附带的说明：只列出 [0, 2π) 内的解
+                        chip(note, icon: "info.circle", tint: .secondary)
+                    } else if s.conclusive {
+                        // 结论本身：极限不存在、级数发散、方程没有实数解
+                        chip(note, icon: "equal.circle.fill", tint: Theme.ok)
+                    } else {
+                        chip("算不出来：\(note)", icon: "exclamationmark.triangle.fill", tint: Theme.warn)
+                            .onTapGesture { app.editingFormula = item.id }
+                    }
                 }
             }
             .onChange(of: app.editingFormula) { _, id in
-                if id == item.id { editText = item.latex }
+                // 求解那一项改的是学生写的原式（不是带结果的整行）
+                if id == item.id { editText = item.solveSource ?? item.latex }
             }
             .alert("改一下式子", isPresented: editing) {
-                TextField("LaTeX，例如 f(x)=x^3-3x", text: $editText)
+                TextField(item.isComputed ? "LaTeX，例如 \\int_0^2 f(x)dx" : "LaTeX，例如 f(x)=x^3-3x", text: $editText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Button("确定") { app.edit(item, latex: editText) }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("识别结果不对时直接改 LaTeX，图像跟着变。")
+                Text(item.isComputed ? "识别结果不对时直接改 LaTeX，结果跟着重新算。" : "识别结果不对时直接改 LaTeX，图像跟着变。")
             }
     }
 
+    private func chip(_ text: String, icon: String, tint: Color) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(tint.opacity(0.1), in: Capsule())
+            .fixedSize()
+            .offset(y: 30)
+    }
 }
 
 /// 选中式子时浮在它上方的操作条：改式子、改笔迹、收起 / 展开图像、删除，最后写着是哪个引擎认的。
@@ -153,6 +169,12 @@ struct FormulaActionBar: View {
             BarButton(title: "删除", systemImage: "trash", role: .destructive) { app.delete(item) }
             if let parent = item.derivedFrom.flatMap({ id in app.functions.first { $0.id == id } }) {
                 Text("由 \(parent.name)(x) 求导")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.ok)
+                    .padding(.leading, 6)
+            } else if let s = item.solution {
+                let uses = s.references.map { "\($0)(x)" }.joined(separator: "、")
+                Text(AppModel.operationTitle(s.operation) + (uses.isEmpty ? "" : " · 用到 \(uses)"))
                     .font(.caption2)
                     .foregroundStyle(Theme.ok)
                     .padding(.leading, 6)
@@ -211,7 +233,7 @@ private struct BusyOverlay: View {
             .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.mini)
-                    Text(job.kind == .derivative ? "求导中" : "识别中").font(.caption2.weight(.semibold))
+                    Text(job.kind == .solve ? "计算中" : "识别中").font(.caption2.weight(.semibold))
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(.regularMaterial, in: Capsule())

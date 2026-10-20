@@ -203,6 +203,11 @@ public struct FunctionGraphView: View {
                      at: CGPoint(x: o.x - 5, y: o.y + 4), anchor: .topTrailing)
         }
 
+        // 定积分：曲线和 x 轴之间涂出来（曲线画在上面）
+        for o in model.overlays {
+            if case .area(let a, let b) = o.kind { drawArea(&ctx, size: size, vp: vp, from: a, to: b, label: o.label) }
+        }
+
         // 导函数（reveal 后，绿色虚线）
         let derivative = Color(red: 0.12, green: 0.62, blue: 0.38)
         if model.reveal {
@@ -231,6 +236,22 @@ public struct FunctionGraphView: View {
         }
 
         if model.reveal { drawReveal(&ctx, size: size, vp: vp, special: special, derivative: derivative) }
+
+        // 极限：趋向的点，画成空心圈，虚线连到两条坐标轴
+        for o in model.overlays {
+            guard case .point(let x, let y) = o.kind else { continue }
+            let q = vp.point(x, y, in: size)
+            guard q.x > -20, q.x < size.width + 20, q.y > -20, q.y < size.height + 20 else { continue }
+            let o0 = vp.point(0, 0, in: size)
+            var guide = Path()
+            guide.move(to: CGPoint(x: q.x, y: min(max(o0.y, 0), size.height))); guide.addLine(to: q)
+            guide.addLine(to: CGPoint(x: min(max(o0.x, 0), size.width), y: q.y))
+            ctx.stroke(guide, with: .color(GraphPalette.result.opacity(0.7)), style: StrokeStyle(lineWidth: 1.2, dash: [4, 4]))
+            let ring = Path(ellipseIn: CGRect(x: q.x - 6.5, y: q.y - 6.5, width: 13, height: 13))
+            ctx.fill(ring, with: .color(Color(.systemBackground)))
+            ctx.stroke(ring, with: .color(GraphPalette.result), lineWidth: 2.2)
+            bubble(&ctx, o.label, near: q, size: size, color: GraphPalette.result)
+        }
 
         // Pencil 悬停：曲线上这一点的坐标
         if let h = hover, !draggingProbe {
@@ -287,6 +308,48 @@ public struct FunctionGraphView: View {
                  at: CGPoint(x: pp.x + 14, y: pp.y - 12), anchor: .bottomLeading)
     }
 
+    /// ∫_a^b：x 轴上方的部分和下方的部分（算负的）用深浅两种绿，两端画竖的虚线，中间写上结果。
+    private func drawArea(_ ctx: inout GraphicsContext, size: CGSize, vp: GraphViewport, from a: Double, to b: Double, label: String) {
+        let xr = vp.xRange(size)
+        let lo = max(min(a, b), xr.lowerBound), hi = min(max(a, b), xr.upperBound)
+        guard hi > lo else { return }
+        let n = max(Int(vp.point(hi, 0, in: size).x - vp.point(lo, 0, in: size).x) / 2, 8)
+        let axis = min(max(vp.point(0, 0, in: size).y, -size.height), size.height * 2)
+        func region(_ keep: (Double) -> Double) -> Path {
+            var p = Path()
+            p.move(to: CGPoint(x: vp.point(lo, 0, in: size).x, y: axis))
+            for i in 0...n {
+                let x = lo + (hi - lo) * Double(i) / Double(n)
+                let y = model.y(x)
+                let q = vp.point(x, y.isFinite ? keep(y) : 0, in: size)
+                p.addLine(to: CGPoint(x: q.x, y: min(max(q.y, -size.height), size.height * 2)))
+            }
+            p.addLine(to: CGPoint(x: vp.point(hi, 0, in: size).x, y: axis))
+            p.closeSubpath()
+            return p
+        }
+        let above = region { max($0, 0) }, below = region { min($0, 0) }
+        ctx.fill(above, with: .color(GraphPalette.result.opacity(0.22)))
+        ctx.fill(below, with: .color(GraphPalette.negative.opacity(0.2)))
+        for x in [a, b] where x.isFinite && xr.contains(x) {
+            var edge = Path()
+            let top = vp.point(x, model.y(x).isFinite ? model.y(x) : 0, in: size)
+            edge.move(to: CGPoint(x: top.x, y: axis)); edge.addLine(to: CGPoint(x: top.x, y: min(max(top.y, 0), size.height)))
+            ctx.stroke(edge, with: .color(GraphPalette.result.opacity(0.8)), style: StrokeStyle(lineWidth: 1.4, dash: [4, 3]))
+        }
+        // 结果写在区间正中、x 轴上方一点
+        let mid = (lo + hi) / 2
+        let my = model.y(mid)
+        let anchor = vp.point(mid, my.isFinite ? my / 2 : 0, in: size)
+        let t = ctx.resolve(Text(label).font(.system(size: 12, weight: .bold, design: .rounded)).foregroundStyle(GraphPalette.result))
+        let m = t.measure(in: CGSize(width: 300, height: 40))
+        let box = CGRect(x: min(max(anchor.x - m.width / 2 - 6, 4), size.width - m.width - 16),
+                         y: min(max(anchor.y - m.height / 2 - 3, 4), size.height - m.height - 10),
+                         width: m.width + 12, height: m.height + 6)
+        ctx.fill(Path(roundedRect: box, cornerRadius: 6), with: .color(Color(.systemBackground).opacity(0.9)))
+        ctx.draw(t, at: CGPoint(x: box.midX, y: box.midY), anchor: .center)
+    }
+
     /// 按每 1.5 pt 取一个样本连成曲线；跨过渐近线（相邻两点差出好几屏）时断开。
     private func curve(size: CGSize, vp: GraphViewport, _ f: (Double) -> Double) -> Path {
         var path = Path()
@@ -319,6 +382,12 @@ public struct FunctionGraphView: View {
         ctx.stroke(shape, with: .color(color.opacity(0.35)), lineWidth: 1)
         ctx.draw(t, at: CGPoint(x: box.midX, y: box.midY), anchor: .center)
     }
+}
+
+/// 求解结果在图像上的颜色：和式子里绿色的答案一致；积分在 x 轴下方的部分用另一种颜色。
+enum GraphPalette {
+    static let result = Color(red: 0.12, green: 0.62, blue: 0.38)
+    static let negative = Color(red: 0.86, green: 0.36, blue: 0.30)
 }
 
 private struct GraphButton: View {
