@@ -3,7 +3,7 @@ import Foundation
 /// 笔迹 → LaTeX。一个协议，几个实现（开发方向报告 P3 的 InkRecognizer）：
 /// - `ServerRecognizer`：把这一行的截图交给 Mac 上的 Server，Server 调 Qwen（qwen3.8-flash 看图）。
 /// - `DashScopeRecognizer`：不经 Server 直接调百炼（只在演示机自己的 iPad 上、Key 不进仓库时用）。
-/// - `ReplayRecognizer`：录好的 LaTeX，断网演示用。
+/// - `ReplayRecognizer`：录好的 LaTeX，按行、擦除轮次、笔画数取，断网演示用（见 Replay.swift）。
 /// - `AppleStrokeRecognizer`（iPadOS 27 的 PKStrokeRecognizer，设备上）：见 AppleStrokeRecognizer.swift。
 /// MyScript iink 由 P1 在 App 里接，同样实现这个协议即可。
 public protocol InkRecognizer {
@@ -36,21 +36,4 @@ public func extractLatex(fromModelReply text: String) throws -> String {
         throw RecognizerError.badResponse(String(text.prefix(120)))
     }
     return latex.trimmingCharacters(in: .whitespacesAndNewlines)
-}
-
-/// 录好的结果：按 (line_id, revision) 或按顺序返回。
-public final class ReplayRecognizer: InkRecognizer {
-    private var byKey: [String: String]
-    private var queue: [String]
-
-    public init(byLineRevision: [String: String] = [:], sequence: [String] = []) {
-        byKey = byLineRevision
-        queue = sequence
-    }
-
-    public func recognize(line: InkLine, imagePNG: Data?) async throws -> RecognitionResult {
-        let key = "\(line.id)#\(line.revision)"
-        let latex = byKey[key] ?? (queue.isEmpty ? "" : queue.removeFirst())
-        return RecognitionResult(lineID: line.id, revision: line.revision, latex: latex, engine: "replay", ms: 0)
-    }
 }
