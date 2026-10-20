@@ -1,9 +1,13 @@
 import Foundation
+import InkCore
 
-/// 断网兜底（方案第 8 节）：黄金路径每一步的真实返回存下来，现场网络不行时按顺序放出来。
-/// - INKTUTOR_REPLAY=record：真跑，同时把每次返回追加到 replay/<route>.json
-/// - INKTUTOR_REPLAY=play：不联网，按顺序返回录好的结果（放完从头循环）
-/// - INKTUTOR_REPLAY=fallback（默认）：真跑；3 秒没返回或出错，才放录好的下一条
+/// 断网兜底（方案第 8 节）：黄金路径每一步的真实返回存下来，现场网络不行时放出来。
+/// - INKTUTOR_REPLAY=record：真跑，同时把返回录下来
+/// - INKTUTOR_REPLAY=play：不联网，只放录好的
+/// - INKTUTOR_REPLAY=fallback（默认）：真跑；3 秒没返回或出错，才放录好的
+///
+/// /recognize 按「哪种模式的第几行 + 擦过几轮 + 这一轮新写了几笔」取（`RecognizeReplay`，和 App 的
+/// ReplayRecognizer 同一套脚本），写到一半多停顿一次也不会错位。/hint 一次批改只要一次，仍按顺序放（`ReplayStore`）。
 actor ReplayStore {
     enum Mode: String { case off, record, play, fallback }
 
@@ -57,20 +61,80 @@ func withReplayFallback(store: ReplayStore, route: String, timeout: Double = 3,
         return (r, false)
     case .fallback:
         do {
-            let r = try await withThrowingTaskGroup(of: String.self) { group in
-                group.addTask { try await live() }
-                group.addTask {
-                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                    throw ReplayError.timeout
-                }
-                defer { group.cancelAll() }
-                return try await group.next()!
-            }
-            return (r, false)
+            return (try await withTimeout(timeout, live), false)
         } catch {
             if let r = await store.next(route) { return (r, true) }
             throw error
         }
+    }
+}
+
+/// /recognize 的回放。录在 replay/recognize-script.json；录过的行替换内置的黄金路径，没录过的行用内置的。
+/// 演示从头来（App 清屏）时 POST /replay/reset，让行号重新从第 1 行数；不 reset 也能对上黄金路径。
+actor RecognizeReplay {
+    let mode: ReplayStore.Mode
+    let file: URL
+    private var recorded: ReplayScript
+    private let tracker = ReplayTracker()
+
+    init(mode: ReplayStore.Mode, directory: URL) {
+        self.mode = mode
+        file = directory.appendingPathComponent("recognize-script.json")
+        recorded = (try? ReplayScript.load(from: file)) ?? ReplayScript()
+    }
+
+    /// 每个 /recognize 请求先过一遍，更新这一行的状态。
+    func position(of up: UploadRequest) -> ReplayTracker.Position {
+        tracker.observe(lineID: up.lineID, mode: up.mode, strokeIDs: up.strokes.map(\.id))
+    }
+
+    func replayed(_ p: ReplayTracker.Position) -> String? {
+        ReplayScript.golden.overlaid(with: recorded)
+            .latex(mode: p.mode, ordinal: p.ordinal, erasePasses: p.erasePasses, strokesInPass: p.strokesInPass)
+    }
+
+    /// 只在 record 模式下录；空结果不录，免得盖掉好的一步。
+    func record(_ p: ReplayTracker.Position, _ latex: String) {
+        guard mode == .record, !latex.isEmpty else { return }
+        recorded.record(mode: p.mode, ordinal: p.ordinal, erasePasses: p.erasePasses, strokesInPass: p.strokesInPass,
+                        latex: latex)
+        try? recorded.save(to: file)
+    }
+
+    func reset() { tracker.reset() }
+}
+
+/// /recognize 用：和 `withReplayFallback` 一样的三种模式，回放按这一行的状态取，不按调用顺序。
+func recognizeWithReplay(_ replay: RecognizeReplay, upload: UploadRequest, timeout: Double = 3,
+                         live: @escaping @Sendable () async throws -> String) async throws -> (String, Bool) {
+    let p = await replay.position(of: upload)
+    switch replay.mode {
+    case .play:
+        if let r = await replay.replayed(p) { return (r, true) }
+        throw ReplayError.nothingRecorded("recognize")
+    case .off, .record:
+        let r = try await live()
+        await replay.record(p, r)
+        return (r, false)
+    case .fallback:
+        do {
+            return (try await withTimeout(timeout, live), false)
+        } catch {
+            if let r = await replay.replayed(p) { return (r, true) }
+            throw error
+        }
+    }
+}
+
+private func withTimeout(_ seconds: Double, _ live: @escaping @Sendable () async throws -> String) async throws -> String {
+    try await withThrowingTaskGroup(of: String.self) { group in
+        group.addTask { try await live() }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw ReplayError.timeout
+        }
+        defer { group.cancelAll() }
+        return try await group.next()!
     }
 }
 
