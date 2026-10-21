@@ -95,7 +95,7 @@ final class BoardLibrary {
     /// 缩略图换过就加一，画廊重新读图。
     private(set) var thumbnailVersion = 0
     let root: URL
-    @ObservationIgnored private var thumbnails: [UUID: (Date, UIImage)] = [:]
+    @ObservationIgnored private var thumbnails: [UUID: (Date, UIImage?)] = [:]
 
     init(root: URL? = nil) {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -200,7 +200,8 @@ final class BoardLibrary {
         let url = folder(id).appendingPathComponent("thumb.jpg")
         let date = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? .distantPast
         if let (d, img) = thumbnails[id], d == date { return img }
-        guard let img = UIImage(contentsOfFile: url.path) else { return nil }
+        // 以前的版本在后台截过白图：当作没有缩略图
+        let img = UIImage(contentsOfFile: url.path).flatMap { BoardThumbnail.isBlank($0) ? nil : $0 }
         thumbnails[id] = (date, img)
         return img
     }
@@ -283,6 +284,8 @@ enum BoardThumbnail {
     /// 把现在屏幕上的纸截一张（去掉顶上的工具栏），宽 720。
     @MainActor
     static func capture(topInset: CGFloat = 86) -> UIImage? {
+        // 在后台截到的是白图：不截，保留原来的缩略图
+        guard UIApplication.shared.applicationState != .background else { return nil }
         guard let window = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
             .flatMap(\.windows)
@@ -293,11 +296,31 @@ enum BoardThumbnail {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         let size = CGSize(width: crop.width * scale, height: crop.height * scale)
-        return UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
             ctx.cgContext.scaleBy(x: scale, y: scale)
             ctx.cgContext.translateBy(x: 0, y: -crop.minY)
             window.drawHierarchy(in: full, afterScreenUpdates: true)
         }
+        return isBlank(image) ? nil : image
+    }
+
+    /// 截出来是一片空白（系统没给画面）：缩成 24×16 看看颜色有没有变化。
+    static func isBlank(_ image: UIImage) -> Bool {
+        let w = 24, h = 16
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        guard let cg = image.cgImage,
+              let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return true }
+        ctx.interpolationQuality = .medium
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var lo = 255, hi = 0
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let v = (Int(pixels[i]) + Int(pixels[i + 1]) + Int(pixels[i + 2])) / 3
+            lo = min(lo, v)
+            hi = max(hi, v)
+        }
+        // 纸上至少有横线、字：最亮和最暗差得出来
+        return hi - lo < 6
     }
 
     /// 只有笔迹时画一张（演示画廊用）：横线纸 + 墨迹。

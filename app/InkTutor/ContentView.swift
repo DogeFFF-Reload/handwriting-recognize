@@ -113,14 +113,18 @@ struct BoardScreen: View {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 app.scroll(to: y)
             }
-            // 开着的时候每 3 秒看一次，有变化就存
+            // 开着的时候每 3 秒看一次，有变化就存；缩略图最多一分钟换一次（App 被直接关掉时画廊里也是新的）
+            var lastThumb = Date()
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                save(thumbnail: false)
+                let refresh = Date().timeIntervalSince(lastThumb) > 60
+                if save(thumbnail: refresh), refresh { lastThumb = Date() }
             }
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active { save(thumbnail: true) }
+        .onChange(of: scenePhase) { old, phase in
+            // 刚要离开（还看得见）时截缩略图；已经到后台了只存数据——这时候截到的是一张白图
+            if phase == .inactive, old == .active { save(thumbnail: true, force: true) }
+            if phase == .background { save(thumbnail: false) }
         }
     }
 
@@ -145,19 +149,23 @@ struct BoardScreen: View {
         app.dismissMenu()
         app.selection = nil
         DispatchQueue.main.async {
-            save(thumbnail: true)
+            save(thumbnail: true, force: true)
             onClose()
         }
     }
 
-    private func save(thumbnail: Bool) {
-        guard let meta, let board = try? BoardLibrary.encoder.encode(app.snapshot()) else { return }
+    /// 存这份草稿。thumbnail：顺便截缩略图（内容没变时只在 force 时截）。返回有没有写盘。
+    @discardableResult
+    private func save(thumbnail: Bool, force: Bool = false) -> Bool {
+        guard let meta, let board = try? BoardLibrary.encoder.encode(app.snapshot()) else { return false }
         let drawing = app.drawingData
         let changed = lastSaved.map { $0.board != board || $0.drawing != drawing } ?? true
+        let thumbnail = thumbnail && (changed || force)
         guard changed || thumbnail else { return }
         let image = thumbnail ? BoardThumbnail.capture() : nil
         library.write(meta.id, board: board, drawing: drawing, thumbnail: image)
         lastSaved = (board, drawing)
+        return true
     }
 }
 
