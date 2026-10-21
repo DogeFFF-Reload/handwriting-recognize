@@ -4,8 +4,8 @@ import SwiftUI
 
 /// 整块画板的 PencilKit 画布。不显示 PKToolPicker；笔 / 橡皮由工具栏和 Pencil Pro 捏一下切换；
 /// Pencil 双击由 App 接管：这一段写完了，在笔尖旁弹出「函数 / 求解 / 几何」（D2）。
-/// 纸可以上下滚（没开手指书写时一根手指拖，开了是两根手指），不缩放；上面一层的式子、卡片、图形用画布坐标摆放，
-/// 跟着 scrollOffset 一起移动。
+/// 纸可以上下滚（没开手指书写时一根手指拖，开了是两根手指），比窗口宽时也能左右滚，不缩放；
+/// 上面一层的式子、卡片、图形用画布坐标摆放，跟着 scrollOffset 一起移动。
 struct PencilCanvas: UIViewRepresentable {
     var app: AppModel
     /// 笔的状态显式传进来：这几个值一变 SwiftUI 就会调 updateUIView 换工具。
@@ -13,8 +13,9 @@ struct PencilCanvas: UIViewRepresentable {
     var penColor: PenColor
     var penWidth: PenWidth
     var allowFinger: Bool
-    /// 纸有多长（显式传进来：一变就会调 updateUIView 改 contentSize）。
+    /// 纸有多长、多宽（显式传进来：一变就会调 updateUIView 改 contentSize）。
     var contentHeight: CGFloat
+    var contentWidth: CGFloat
 
     func makeUIView(context: Context) -> PKCanvasView {
         let canvas = PKCanvasView()
@@ -24,8 +25,9 @@ struct PencilCanvas: UIViewRepresentable {
         canvas.isScrollEnabled = true
         canvas.alwaysBounceVertical = true
         canvas.alwaysBounceHorizontal = false
+        canvas.isDirectionalLockEnabled = true
         canvas.showsVerticalScrollIndicator = true
-        canvas.showsHorizontalScrollIndicator = false
+        canvas.showsHorizontalScrollIndicator = true
         canvas.contentInsetAdjustmentBehavior = .never
         canvas.minimumZoomScale = 1
         canvas.maximumZoomScale = 1
@@ -47,9 +49,19 @@ struct PencilCanvas: UIViewRepresentable {
         canvas.tool = app.tool
         canvas.drawingPolicy = allowFinger ? .anyInput : .pencilOnly
         context.coordinator.app = app
-        // 纸的长度：只往竖直方向接长，宽度就是屏幕宽
-        let size = CGSize(width: app.boardSize.width, height: max(contentHeight, app.boardSize.height))
-        if canvas.contentSize != size { canvas.contentSize = size }
+        // 纸的大小：往下接长；宽度一般就是窗口宽，窗口比写过的地方窄时加宽
+        let size = CGSize(width: max(contentWidth, app.boardSize.width), height: max(contentHeight, app.boardSize.height))
+        if canvas.contentSize != size {
+            canvas.contentSize = size
+            // 窗口拉宽、纸变窄了：滚出界的那部分收回来（下一轮再改，别在更新视图时改状态）
+            let limit = CGPoint(x: max(0, size.width - app.boardSize.width), y: max(0, size.height - app.boardSize.height))
+            let offset = canvas.contentOffset
+            if offset.x > limit.x || offset.y > limit.y {
+                DispatchQueue.main.async {
+                    canvas.setContentOffset(CGPoint(x: min(offset.x, limit.x), y: min(offset.y, limit.y)), animated: false)
+                }
+            }
+        }
     }
 
     func makeCoordinator() -> Coordinator {

@@ -52,6 +52,8 @@ final class AppModel {
     private(set) var scrollOffset: CGPoint = .zero
     /// 纸有多长：至少三屏，写到靠近底下时自动接长。
     private(set) var contentHeight: CGFloat = 0
+    /// 纸有多宽：至少一屏；窗口拉窄（或者转成竖屏）后，原来写在右边的东西还在纸上，纸跟着加宽、可以左右滚。
+    private(set) var contentWidth: CGFloat = 0
 
     /// 现在看得见的那块（画布坐标）：新卡片、菜单、提示都摆在这里面。
     var visibleRect: CGRect { CGRect(origin: scrollOffset, size: boardSize) }
@@ -113,22 +115,35 @@ final class AppModel {
         if offset.y + h > contentHeight - h * 0.5 { contentHeight = offset.y + 2 * h }
     }
 
-    /// 纸至少三屏长，而且比写到的最下面再多一屏。
+    /// 纸至少三屏长，而且比写到的最下面再多一屏；宽度一般是一屏，写到窗口外面时加宽到最右边再留一点边。
     func growPage() {
         var bottom = drawing.strokes.isEmpty ? 0 : drawing.bounds.maxY
-        for f in functions { bottom = max(bottom, f.frame.maxY, f.card.minimized ? 0 : f.card.center.y + f.card.size.height / 2) }
-        for s in shapes { bottom = max(bottom, s.figure.bounds.maxY) }
-        for g in geometries { bottom = max(bottom, g.card.center.y + g.card.size.height / 2) }
+        var right = drawing.strokes.isEmpty ? 0 : drawing.bounds.maxX
+        for f in functions {
+            bottom = max(bottom, f.frame.maxY, f.card.minimized ? 0 : f.card.center.y + f.card.size.height / 2)
+            right = max(right, f.frame.maxX, f.card.minimized ? 0 : f.card.center.x + f.card.size.width / 2)
+        }
+        for s in shapes {
+            bottom = max(bottom, s.figure.bounds.maxY)
+            right = max(right, s.figure.bounds.maxX)
+        }
+        for g in geometries {
+            bottom = max(bottom, g.card.center.y + g.card.size.height / 2)
+            right = max(right, g.card.center.x + g.card.size.width / 2)
+        }
         let needed = max(3 * boardSize.height, bottom + boardSize.height)
         if needed > contentHeight { contentHeight = needed }
+        let width = right > boardSize.width ? (right + 40).rounded(.up) : boardSize.width
+        if width != contentWidth { contentWidth = width }
     }
 
-    /// 程序滚到某个位置（打开草稿时回到上次看的地方、演示）。
+    /// 程序滚到某个位置（打开草稿时回到上次看的地方、演示）。左右不动。
     func scroll(to y: CGFloat) {
         growPage()
-        let target = CGPoint(x: 0, y: max(0, min(y, contentHeight - boardSize.height)))
+        let target = CGPoint(x: max(0, min(scrollOffset.x, contentWidth - boardSize.width)),
+                             y: max(0, min(y, contentHeight - boardSize.height)))
         if let canvas {
-            canvas.contentSize = CGSize(width: boardSize.width, height: contentHeight)
+            canvas.contentSize = CGSize(width: contentWidth, height: contentHeight)
             canvas.setContentOffset(target, animated: false)
         }
         scrolled(to: target)
