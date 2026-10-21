@@ -41,6 +41,14 @@ struct PencilCanvas: UIViewRepresentable {
         tap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         tap.cancelsTouchesInView = false
         canvas.addGestureRecognizer(tap)
+        // Pencil 落笔时顺便看看是哪种笔（PencilProbe），不影响书写
+        let probe = PencilTouchProbe(target: nil, action: nil)
+        probe.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        probe.cancelsTouchesInView = false
+        probe.delaysTouchesBegan = false
+        probe.delaysTouchesEnded = false
+        probe.onPencil = { [weak coordinator = context.coordinator] rolled in coordinator?.notice(rolled ? .pro : .pencil) }
+        canvas.addGestureRecognizer(probe)
         app.attach(canvas)
         return canvas
     }
@@ -98,6 +106,7 @@ struct PencilCanvas: UIViewRepresentable {
 
         // iPadOS 17.5+：双击 = 这一段写完了。不执行系统的「切到橡皮」。
         func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
+            notice(.doubleTap)
             let point = tap.hoverPose?.location
             if !loggedTap {
                 loggedTap = true
@@ -113,8 +122,17 @@ struct PencilCanvas: UIViewRepresentable {
 
         // Pencil Pro 捏一下 = 切换笔 / 橡皮
         func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
+            notice(.pro)
             guard squeeze.phase == .ended else { return }
             app.eraserOn.toggle()
+        }
+
+        /// 双击、捏压、Pencil 落笔时记下用的是哪种笔（PencilProbe），工具栏的「识别」键默认显不显示按它定。
+        /// 刚认出 Pencil Pro、用户又没自己拨过开关时，「识别」键会收起来：说一声去哪找。
+        func notice(_ evidence: PencilProbe.Evidence) {
+            guard PencilProbe.note(evidence), evidence == .pro, PencilProbe.choice == nil else { return }
+            let v = app.visibleRect
+            app.toast("认出 Pencil Pro，「识别」收进了设置键", at: CGPoint(x: v.midX, y: v.minY + app.topInset + 30), .info)
         }
 
         private func keepAppTool(on view: UIView?) {
