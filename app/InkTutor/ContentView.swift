@@ -79,6 +79,7 @@ struct BoardScreen: View {
     var body: some View {
         ZStack(alignment: .top) {
             GeometryReader { geo in
+                // 画布和横线纸就是窗口那么大（纸在画布里面滚）；式子、卡片那一层是整张纸那么大，挂在上面，不撑大下面这层
                 ZStack(alignment: .topLeading) {
                     PaperBackground(app: app)
                     PencilCanvas(app: app, eraserOn: app.eraserOn, penColor: app.penColor, penWidth: app.penWidth,
@@ -89,8 +90,9 @@ struct BoardScreen: View {
                             .position(x: geo.size.width / 2, y: geo.size.height * 0.46)
                             .transition(.opacity)
                     }
-                    ScrollingOverlay(app: app)
                 }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .overlay(alignment: .topLeading) { ScrollingOverlay(app: app) }
                 .onAppear { resized(geo.size) }
                 .onChange(of: geo.size) { _, s in resized(s) }
             }
