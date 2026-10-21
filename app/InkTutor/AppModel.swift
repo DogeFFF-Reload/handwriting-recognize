@@ -1097,7 +1097,8 @@ final class AppModel {
         var chain: [InkRecognizer]
         switch pref {
         case "myscript": chain = [myscript].compactMap { $0 }
-        case "direct": chain = [qwen].compactMap { $0 }
+        // 直连百炼 = 千问优先：千问出错或结果为空时，退到设备端 MyScript，再到 Server（初赛文案写的「MyScript 离线兜底」）
+        case "direct": chain = [qwen, myscript, mac].compactMap { $0 }
         case "server": chain = [mac].compactMap { $0 }
         case "replay": chain = []
         default: chain = [myscript, qwen, mac].compactMap { $0 }
