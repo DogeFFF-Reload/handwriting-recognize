@@ -13,6 +13,11 @@ struct BoardOverlay: View {
 
             ForEach(app.ghosts) { GhostView(ghost: $0) }
 
+            // 几何图形画在纸上，式子和卡片在它上面
+            ForEach(app.shapes) { item in
+                ShapeView(item: item, app: app)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
             ForEach(app.functions) { item in
                 FormulaView(item: item, app: app)
             }
@@ -31,6 +36,14 @@ struct BoardOverlay: View {
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
 
+            // 选中的几何图形：节点和信息条在最上层
+            if case .shape(let id)? = app.selection, let item = app.shapes.first(where: { $0.id == id }) {
+                ShapeHandles(item: item, app: app)
+                ShapeInfoBar(item: item, app: app)
+                    .pinned(infoBarAlignment(item), at: infoBarAnchor(item))
+                    .transition(.opacity.combined(with: .offset(y: 6)))
+            }
+
             ForEach(app.busy) { BusyOverlay(job: $0) }
 
             if let menu = app.menu {
@@ -40,6 +53,30 @@ struct BoardOverlay: View {
 
             ForEach(app.toasts) { ToastView(toast: $0, boardSize: app.boardSize) }
         }
+    }
+
+    /// 信息条放在图形上方；旋转手柄在上方时（多边形）放到下方，免得挡住手柄。
+    private func barBelow(_ item: ShapeItem) -> Bool {
+        let box = item.figure.bounds
+        guard let r = item.figure.handles.first(where: { $0.role == .rotate }) else {
+            return box.minY < app.topInset + 70
+        }
+        return r.point.y < box.midY && box.maxY + 80 < app.boardSize.height
+    }
+
+    private func infoBarAlignment(_ item: ShapeItem) -> Alignment {
+        barBelow(item) ? .topLeading : .bottomLeading
+    }
+
+    private func infoBarAnchor(_ item: ShapeItem) -> CGPoint {
+        let box = item.figure.bounds
+        let below = barBelow(item)
+        var gap: CGFloat = below ? 30 : 22
+        // 立体图形下方紧挨着是「拖动旋转」的手柄
+        if case .solid = item.figure, below { gap = 66 }
+        let x = min(max(box.minX - 10, 16), app.boardSize.width - 560)
+        let y = below ? box.maxY + gap : max(box.minY - gap, app.topInset + 8)
+        return CGPoint(x: max(x, 16), y: y)
     }
 }
 

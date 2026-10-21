@@ -44,14 +44,15 @@ struct InkSegment: Equatable {
     var targetID: UUID?
 }
 
-/// 选中的是哪一样：式子（出操作条）还是卡片（出变换框）。
+/// 选中的是哪一样：式子（出操作条）、卡片（出变换框）还是几何图形（出节点）。
 enum Selection: Equatable {
     case formula(UUID)
     case card(UUID)
+    case shape(UUID)
 
     var id: UUID {
         switch self {
-        case .formula(let id), .card(let id): return id
+        case .formula(let id), .card(let id), .shape(let id): return id
         }
     }
 }
@@ -171,6 +172,25 @@ final class FunctionItem: Identifiable {
         latex = lhs + "=" + Poly.latex(terms)
         size = MathLabel.measure(latex, fontSize: fontSize)
         if let parsed = try? FunctionDefinition.parse(latex) { definition = parsed }
+    }
+}
+
+/// 选「几何」认出来的一个图形：直接画在纸上原来草图的位置（不放卡片），选中后拖节点改形状、大小、方向。
+@Observable
+final class ShapeItem: Identifiable {
+    let id = UUID()
+    var figure: Figure
+    /// 同一段草图认出来的几个图形是一组：「还原笔迹」时一起收回。
+    let group: UUID
+    /// 这一组的原始笔迹（只放在组里的一个图形上）。
+    var ink: [PKStroke]
+    /// 顶点字母、圆心、焦点这些标注。
+    var showsLabels = true
+
+    init(figure: Figure, group: UUID, ink: [PKStroke]) {
+        self.figure = figure
+        self.group = group
+        self.ink = ink
     }
 }
 

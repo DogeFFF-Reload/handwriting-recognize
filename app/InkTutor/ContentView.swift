@@ -18,7 +18,7 @@ struct ContentView: View {
                     PaperBackground()
                     PencilCanvas(app: app, eraserOn: app.eraserOn, penColor: app.penColor, penWidth: app.penWidth,
                                  allowFinger: allowFinger)
-                    if !app.hasInk, app.functions.isEmpty, app.geometries.isEmpty {
+                    if !app.hasInk, app.functions.isEmpty, app.geometries.isEmpty, app.shapes.isEmpty {
                         EmptyBoardHint()
                             .position(x: geo.size.width / 2, y: geo.size.height * 0.46)
                             .transition(.opacity)
