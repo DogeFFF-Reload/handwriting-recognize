@@ -7,7 +7,8 @@ import SwiftUI
 /// 用 Pencil 点选；再双击一次、落笔写字、或手指点空白处都会收起。
 struct SegmentMenu: View {
     let state: SegmentMenuState
-    var boardSize: CGSize
+    /// 看得见的那块纸（画布坐标）：圆钮不放到屏幕外、不钻到工具栏下面。
+    var visible: CGRect
     var topInset: CGFloat
     var onChoose: (SegmentKind) -> Void
 
@@ -72,15 +73,16 @@ struct SegmentMenu: View {
         func fits(_ ps: [CGPoint]) -> Bool {
             ps.allSatisfy { p in
                 let box = CGRect(x: p.x - half, y: p.y - half, width: 2 * half, height: 2 * half)
-                return !box.intersects(ink) && box.minX > 8 && box.maxX < boardSize.width - 8
-                    && box.minY > topInset && box.maxY < boardSize.height - 8
+                return !box.intersects(ink) && box.minX > visible.minX + 8 && box.maxX < visible.maxX - 8
+                    && box.minY > visible.minY + topInset && box.maxY < visible.maxY - 8
             }
         }
         for center in [-60.0, -90, -30, 0, -120, -150, 180, 30, 150, 60, 120, 90] where fits(spots(center)) {
             return spots(center)
         }
         return spots(-90).map {
-            CGPoint(x: min(max($0.x, 44), boardSize.width - 44), y: min(max($0.y, topInset + 40), boardSize.height - 44))
+            CGPoint(x: min(max($0.x, visible.minX + 44), visible.maxX - 44),
+                    y: min(max($0.y, visible.minY + topInset + 40), visible.maxY - 44))
         }
     }
 

@@ -1,21 +1,75 @@
 import SwiftUI
 
-/// 顶上只放笔的状态和功能键，两枚浮在纸上的胶囊：
-/// 左边是笔（笔 / 橡皮、颜色、粗细），右边是撤销、重做、「完成一段」、清空、识别引擎、设置。
+/// 顶上只放笔的状态和功能键，三枚浮在纸上的胶囊：
+/// 最左边回草稿画廊、草稿的名字（点一下改名）；然后是笔（笔 / 橡皮、颜色、粗细）；
+/// 右边是撤销、重做、「完成一段」、清空、识别引擎、设置。
 /// 模式不再在这里选：写完一段双击笔身，在笔尖旁选。
 struct TopBar: View {
     @Bindable var app: AppModel
     var engine: String
+    /// 草稿的名字。
+    var title: String
+    /// 回画廊。
+    var onBack: () -> Void
+    /// 改名（演示纸没有）。
+    var onRename: (() -> Void)?
     var onSettings: () -> Void
     @State private var confirmClear = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+            boardGroup
             penGroup
             Spacer(minLength: 0)
             actionGroup
         }
         .padding(.horizontal, 16)
+    }
+
+    // MARK: 草稿
+
+    private var boardGroup: some View {
+        HStack(spacing: 2) {
+            Button(action: onBack) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.accent)
+            .hoverEffect(.highlight)
+            .accessibilityLabel("回到草稿列表")
+            Button {
+                onRename?()
+            } label: {
+                HStack(spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .frame(maxWidth: 170, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if onRename != nil {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, 2)
+                .padding(.trailing, 10)
+                .frame(height: 40)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.primary)
+            .disabled(onRename == nil)
+            .accessibilityLabel("草稿名字：\(title)")
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 52)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.hairline))
+        .shadow(color: .black.opacity(0.08), radius: 14, y: 5)
     }
 
     // MARK: 笔

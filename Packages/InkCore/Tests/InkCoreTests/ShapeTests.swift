@@ -540,6 +540,20 @@ final class ShapeRecognizerTests: XCTestCase {
         XCTAssertEqual(Figure.solid(Solid3(kind: .cylinder, center: .zero, dims: [40, 80])).facts.first, "r = 1")
     }
 
+    /// 草稿存盘：图形编码再解码回来一模一样。
+    func testFiguresSurviveSaving() throws {
+        let figs: [Figure] = [
+            .segment(CGPoint(x: 1, y: 2), CGPoint(x: 30, y: 40)),
+            .polygon(Polygon2(vertices: [CGPoint(x: 0, y: 0), CGPoint(x: 100, y: 0), CGPoint(x: 100, y: 60), CGPoint(x: 0, y: 60)], rule: .rectangle)),
+            .ellipse(Ellipse2(center: CGPoint(x: 5, y: 6), a: 50, b: 30, angle: 0.3, isCircle: false)),
+            .solid(Solid3(kind: .cylinder, center: CGPoint(x: 300, y: 300), dims: [40, 90], yaw: 0.2, pitch: 0.4)),
+        ]
+        let data = try JSONEncoder().encode(figs)
+        XCTAssertEqual(try JSONDecoder().decode([Figure].self, from: data), figs)
+        let req = DerivativeRequest(name: "f", order: 2, point: 1.5, variable: nil)
+        XCTAssertEqual(try JSONDecoder().decode(DerivativeRequest.self, from: JSONEncoder().encode(req)), req)
+    }
+
     func testExtrudeSquareToCube() throws {
         let sq = Figure.polygon(Polygon2(vertices: [CGPoint(x: 100, y: 100), CGPoint(x: 200, y: 100), CGPoint(x: 200, y: 200), CGPoint(x: 100, y: 200)], rule: .square))
         XCTAssertEqual(sq.solidOptions, [.cube, .pyramid])

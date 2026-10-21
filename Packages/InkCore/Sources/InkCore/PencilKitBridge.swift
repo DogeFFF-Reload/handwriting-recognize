@@ -17,7 +17,7 @@ public enum PencilKitBridge {
         var next = 1
         public init() {}
 
-        mutating func id(for stroke: PKStroke) -> String {
+        public mutating func id(for stroke: PKStroke) -> String {
             let b = stroke.renderBounds
             let key = String(format: "%.6f|%.1f|%.1f|%.1f|%.1f", stroke.path.creationDate.timeIntervalSinceReferenceDate,
                              b.minX, b.minY, b.width, b.height)

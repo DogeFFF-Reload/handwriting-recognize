@@ -11,6 +11,8 @@ public struct FunctionGraphView: View {
     var name: String
     var tint: Color
     var interactive: Bool
+    /// 简洁模式：只画网格、坐标轴和曲线（不标零点极值、不画导函数和切线、不涂积分面积、没有缩放按钮）。
+    var minimal: Bool
 
     @State private var lastDrag: CGSize?
     @State private var draggingProbe = false
@@ -18,11 +20,12 @@ public struct FunctionGraphView: View {
     @State private var hover: CGPoint?
     @State private var pinned: GraphSpecialPoint?
 
-    public init(model: GraphModel, name: String = "f", tint: Color = .blue, interactive: Bool = true) {
+    public init(model: GraphModel, name: String = "f", tint: Color = .blue, interactive: Bool = true, minimal: Bool = false) {
         self.model = model
         self.name = name
         self.tint = tint
         self.interactive = interactive
+        self.minimal = minimal
     }
 
     public var body: some View {
@@ -42,17 +45,17 @@ public struct FunctionGraphView: View {
                 pinned = nil
             }
             .onTapGesture(coordinateSpace: .local) { p in
-                guard interactive else { return }
+                guard interactive, !minimal else { return }
                 pin(at: p, vp: vp, size: size)
             }
             .onContinuousHover(coordinateSpace: .local) { phase in
                 switch phase {
-                case .active(let p): hover = p
+                case .active(let p): hover = minimal ? nil : p
                 case .ended: hover = nil
                 }
             }
             .overlay(alignment: .bottomTrailing) {
-                if interactive { zoomButtons(vp: vp, size: size) }
+                if interactive, !minimal { zoomButtons(vp: vp, size: size) }
             }
             .onChange(of: model.viewport == nil, initial: true) { _, isNil in
                 // 换了函数（或第一次出现）时按函数取景，之后固定：拖滑条时视窗不跟着跳
@@ -70,7 +73,7 @@ public struct FunctionGraphView: View {
                 if lastDrag == nil {
                     lastDrag = .zero
                     // 从切点附近按下：拖切点；否则平移
-                    if model.reveal {
+                    if model.reveal, !minimal {
                         let cur = model.viewport ?? vp
                         let p = cur.point(probeX(cur, size), model.y(probeX(cur, size)), in: size)
                         draggingProbe = hypot(p.x - g.startLocation.x, p.y - g.startLocation.y) < 30
@@ -201,6 +204,13 @@ public struct FunctionGraphView: View {
         if o.x > 10, o.x < size.width, o.y > 0, o.y < size.height - 14 {
             ctx.draw(Text("O").font(.system(size: 10, design: .serif).italic()).foregroundStyle(.secondary),
                      at: CGPoint(x: o.x - 5, y: o.y + 4), anchor: .topTrailing)
+        }
+
+        // 简洁模式：只要曲线
+        if minimal {
+            ctx.stroke(curve(size: size, vp: vp, model.y), with: .color(tint),
+                       style: StrokeStyle(lineWidth: 2.75, lineCap: .round, lineJoin: .round))
+            return
         }
 
         // 定积分：曲线和 x 轴之间涂出来（曲线画在上面）

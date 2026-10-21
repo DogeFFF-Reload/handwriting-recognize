@@ -124,7 +124,11 @@ final class FunctionItem: Identifiable {
     var graph: GraphModel?
     var card: CardFrame
     var showsSliders = false
+    /// 卡片右上角的小眼睛：只留函数图像和坐标轴，参数滑条、切线、导函数、式子都收起来。
+    var minimal = false
     let tint: Color
+    /// 曲线颜色是 Theme.curves 里的第几个（存盘用）；算出来的那几项是 -1（绿色）。
+    var tintIndex = -1
     var engine: String?
     var ms: Int?
     /// 求导得来的：原函数是哪一条、学生写的是 f'(x) 还是 f''(x)、f'(2)。原函数一改就重新求。

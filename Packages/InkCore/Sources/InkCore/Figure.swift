@@ -27,9 +27,9 @@ public struct Vec3: Equatable {
 }
 
 /// 多边形：三角形、四边形、正多边形……顶点按画布上顺时针排（有向面积为正）。
-public struct Polygon2: Equatable {
+public struct Polygon2: Equatable, Codable {
     /// 拖顶点时保持的性质。
-    public enum Rule: String, Equatable {
+    public enum Rule: String, Equatable, Codable {
         /// 顶点随便拖，名字跟着现在的样子变（拖成直角就叫直角三角形）。
         case free
         case square, rectangle, rhombus, parallelogram
@@ -81,7 +81,7 @@ public struct Polygon2: Equatable {
 }
 
 /// 椭圆（圆是 a = b 的椭圆）。
-public struct Ellipse2: Equatable {
+public struct Ellipse2: Equatable, Codable {
     public var center: CGPoint
     /// 沿 angle 方向的半轴。
     public var a: CGFloat
@@ -127,8 +127,8 @@ public struct Ellipse2: Equatable {
 }
 
 /// 立体图形：真正的三维尺寸 + 视角，正交投影到画布上。
-public struct Solid3: Equatable {
-    public enum Kind: String, Equatable, CaseIterable {
+public struct Solid3: Equatable, Codable {
+    public enum Kind: String, Equatable, CaseIterable, Codable {
         case cube, cuboid, cylinder, cone, sphere, prism, pyramid, tetrahedron
 
         public var name: String {
@@ -169,7 +169,8 @@ public struct Solid3: Equatable {
 }
 
 /// 一个几何图形。
-public enum Figure: Equatable {
+/// 可以存进文件（草稿里的几何图形）。
+public enum Figure: Equatable, Codable {
     case segment(CGPoint, CGPoint)
     case polygon(Polygon2)
     case ellipse(Ellipse2)

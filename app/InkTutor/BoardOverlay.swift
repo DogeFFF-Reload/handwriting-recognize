@@ -47,11 +47,11 @@ struct BoardOverlay: View {
             ForEach(app.busy) { BusyOverlay(job: $0) }
 
             if let menu = app.menu {
-                SegmentMenu(state: menu, boardSize: app.boardSize, topInset: app.topInset) { app.choose($0) }
+                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInset) { app.choose($0) }
                     .transition(.opacity)
             }
 
-            ForEach(app.toasts) { ToastView(toast: $0, boardSize: app.boardSize) }
+            ForEach(app.toasts) { ToastView(toast: $0, visible: app.visibleRect) }
         }
     }
 
@@ -59,9 +59,9 @@ struct BoardOverlay: View {
     private func barBelow(_ item: ShapeItem) -> Bool {
         let box = item.figure.bounds
         guard let r = item.figure.handles.first(where: { $0.role == .rotate }) else {
-            return box.minY < app.topInset + 70
+            return box.minY < app.visibleRect.minY + app.topInset + 70
         }
-        return r.point.y < box.midY && box.maxY + 80 < app.boardSize.height
+        return r.point.y < box.midY && box.maxY + 80 < app.visibleRect.maxY
     }
 
     private func infoBarAlignment(_ item: ShapeItem) -> Alignment {
@@ -74,9 +74,10 @@ struct BoardOverlay: View {
         var gap: CGFloat = below ? 30 : 22
         // 立体图形下方紧挨着是「拖动旋转」的手柄
         if case .solid = item.figure, below { gap = 66 }
-        let x = min(max(box.minX - 10, 16), app.boardSize.width - 560)
-        let y = below ? box.maxY + gap : max(box.minY - gap, app.topInset + 8)
-        return CGPoint(x: max(x, 16), y: y)
+        let v = app.visibleRect
+        let x = min(max(box.minX - 10, v.minX + 16), v.maxX - 560)
+        let y = below ? box.maxY + gap : max(box.minY - gap, v.minY + app.topInset + 8)
+        return CGPoint(x: max(x, v.minX + 16), y: y)
     }
 }
 
@@ -305,7 +306,8 @@ private struct GhostView: View {
 
 private struct ToastView: View {
     let toast: Toast
-    var boardSize: CGSize
+    /// 看得见的那块纸（画布坐标）：提示不跑到屏幕外。
+    var visible: CGRect
 
     private var icon: String {
         switch toast.style {
@@ -336,8 +338,8 @@ private struct ToastView: View {
         .overlay(Capsule().strokeBorder(tint.opacity(0.3)))
         .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
         .fixedSize()
-        .position(x: min(max(toast.point.x, 180), boardSize.width - 180),
-                  y: min(max(toast.point.y, 110), boardSize.height - 40))
+        .position(x: min(max(toast.point.x, visible.minX + 180), visible.maxX - 180),
+                  y: min(max(toast.point.y, visible.minY + 110), visible.maxY - 40))
         .allowsHitTesting(false)
         .transition(.scale(scale: 0.9).combined(with: .opacity))
     }

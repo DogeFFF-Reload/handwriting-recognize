@@ -38,10 +38,17 @@ final class AppModel {
     private(set) var hasInk = false
     private(set) var canUndo = false
     private(set) var canRedo = false
-    /// 画板大小（ContentView 量好了告诉这里，用来把卡片摆在屏幕里）。
+    /// 屏幕上看得见的那块纸的大小（BoardScreen 量好了告诉这里）。
     var boardSize: CGSize = CGSize(width: 1180, height: 820)
     /// 顶上工具栏占掉的高度（状态栏 24 + 上边距 8 + 胶囊 52 + 留白），卡片和菜单不往那里放。
     let topInset: CGFloat = 100
+    /// 纸往上滚了多少（画布坐标 = 屏幕坐标 + scrollOffset）。式子、卡片、图形都放在画布坐标里，跟着纸一起滚。
+    private(set) var scrollOffset: CGPoint = .zero
+    /// 纸有多长：至少三屏，写到靠近底下时自动接长。
+    private(set) var contentHeight: CGFloat = 0
+
+    /// 现在看得见的那块（画布坐标）：新卡片、菜单、提示都摆在这里面。
+    var visibleRect: CGRect { CGRect(origin: scrollOffset, size: boardSize) }
 
     @ObservationIgnored private weak var canvas: PKCanvasView?
     @ObservationIgnored private var drawing = PKDrawing()
@@ -88,6 +95,37 @@ final class AppModel {
         }
         functions.removeAll { $0.showingInk && $0.inkIDs.isEmpty && !hasStrokes(near: $0) }
         refreshUndo()
+        growPage()
+    }
+
+    // MARK: 滚动
+
+    /// 画布滚动了（PencilCanvas 的 scrollViewDidScroll）。滚到靠近底下时纸接长一屏。
+    func scrolled(to offset: CGPoint) {
+        scrollOffset = offset
+        let h = boardSize.height
+        if offset.y + h > contentHeight - h * 0.5 { contentHeight = offset.y + 2 * h }
+    }
+
+    /// 纸至少三屏长，而且比写到的最下面再多一屏。
+    func growPage() {
+        var bottom = drawing.strokes.isEmpty ? 0 : drawing.bounds.maxY
+        for f in functions { bottom = max(bottom, f.frame.maxY, f.card.minimized ? 0 : f.card.center.y + f.card.size.height / 2) }
+        for s in shapes { bottom = max(bottom, s.figure.bounds.maxY) }
+        for g in geometries { bottom = max(bottom, g.card.center.y + g.card.size.height / 2) }
+        let needed = max(3 * boardSize.height, bottom + boardSize.height)
+        if needed > contentHeight { contentHeight = needed }
+    }
+
+    /// 程序滚到某个位置（打开草稿时回到上次看的地方、演示）。
+    func scroll(to y: CGFloat) {
+        growPage()
+        let target = CGPoint(x: 0, y: max(0, min(y, contentHeight - boardSize.height)))
+        if let canvas {
+            canvas.contentSize = CGSize(width: boardSize.width, height: contentHeight)
+            canvas.setContentOffset(target, animated: false)
+        }
+        scrolled(to: target)
     }
 
     private func hasStrokes(near f: FunctionItem) -> Bool {
@@ -111,7 +149,7 @@ final class AppModel {
         }
         selection = nil
         guard let segment = segment(near: point) else {
-            toast("先写一段，写完再双击笔身", at: point ?? CGPoint(x: boardSize.width / 2, y: boardSize.height / 2), .info)
+            toast("先写一段，写完再双击笔身", at: point ?? CGPoint(x: visibleRect.midX, y: visibleRect.midY), .info)
             return
         }
         let tip = point ?? lastPenPoint(in: segment) ?? CGPoint(x: segment.bounds.maxX, y: segment.bounds.midY)
@@ -256,9 +294,11 @@ final class AppModel {
             item.size = size
         } else {
             let frame = CGRect(origin: origin, size: size)
+            let colorIndex = functions.filter { !$0.isComputed }.count
             item = FunctionItem(lineID: lineID, latex: latex, origin: origin, fontSize: fontSize, size: size,
                                 card: placeCard(next: frame, size: CGSize(width: 360, height: 252)),
-                                tint: Theme.curve(functions.filter { !$0.isComputed }.count))
+                                tint: Theme.curve(colorIndex))
+            item.tintIndex = colorIndex
             item.revision = revision
         }
         item.engine = r.engine
@@ -313,9 +353,12 @@ final class AppModel {
 
     /// 函数卡片默认挂在式子右上角；贴边放不下时挪进屏幕，还是会压住式子就放到式子下面。
     private func placeCard(next formula: CGRect, size: CGSize) -> CardFrame {
+        // 摆在看得见的那块纸里（纸可以滚）
+        let v = visibleRect
         func clamped(_ c: CGPoint) -> CGPoint {
-            CGPoint(x: min(max(c.x, size.width / 2 + 16), boardSize.width - size.width / 2 - 16),
-                    y: min(max(c.y, topInset + size.height / 2 + 8), boardSize.height - size.height / 2 - 16))
+            let x = min(max(c.x, v.minX + size.width / 2 + 16), v.maxX - size.width / 2 - 16)
+            let y = min(max(c.y, v.minY + topInset + size.height / 2 + 8), v.maxY - size.height / 2 - 16)
+            return CGPoint(x: x, y: y)
         }
         var c = clamped(CGPoint(x: formula.maxX + 18 + size.width / 2, y: formula.minY - 14 - size.height / 2))
         var rect = CGRect(x: c.x - size.width / 2, y: c.y - size.height / 2, width: size.width, height: size.height)
@@ -371,7 +414,8 @@ final class AppModel {
         var d = drawing
         d.strokes.append(contentsOf: item.ink)
         setDrawing(d)
-        item.inkIDs = item.inkSourceIDs
+        // 按笔画本身重新取 id（重新打开的草稿里，原来记的 id 已经对不上了）
+        item.inkIDs = item.ink.map { ids.id(for: $0) }
         withAnimation(.easeOut(duration: 0.2)) { item.showingInk = true }
         toast("改完后双击笔身，选「\(item.isComputed ? "求解" : "函数")」重新识别",
               at: CGPoint(x: item.frame.midX, y: item.frame.maxY + 26), .info)
@@ -634,9 +678,11 @@ final class AppModel {
     private func convertToFunction(_ item: FunctionItem, latex: String) {
         let size = MathLabel.measure(latex, fontSize: item.fontSize)
         let frame = CGRect(origin: item.origin, size: size)
+        let colorIndex = functions.filter { !$0.isComputed }.count
         let new = FunctionItem(lineID: item.lineID, latex: latex, origin: item.origin, fontSize: item.fontSize, size: size,
                                card: placeCard(next: frame, size: CGSize(width: 360, height: 252)),
-                               tint: Theme.curve(functions.filter { !$0.isComputed }.count))
+                               tint: Theme.curve(colorIndex))
+        new.tintIndex = colorIndex
         withAnimation(.easeOut(duration: 0.2)) {
             replaceItem(item, with: new)
             new.engine = "手动"
@@ -960,6 +1006,20 @@ extension AppModel {
             loadShapesDemo(solids: name == "solids")
             return
         }
+        // 卡片右上角的小眼睛关上：只剩函数图像和坐标轴
+        if name == "clean" {
+            loadDemo("reveal")
+            eraserOn = false
+            selection = nil
+            functions.first { $0.graph != nil }?.minimal = true
+            return
+        }
+        // 纸往下滚了一段：笔迹、式子、卡片、横线一起移动
+        if name == "scrolled" {
+            loadDemo("solve")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.scroll(to: 240) }
+            return
+        }
         clear()
         let left: CGFloat = 120
         if name == "menu" {
@@ -1000,6 +1060,7 @@ extension AppModel {
                                  size: MathLabel.measure("g(x)=\\sin x", fontSize: 34),
                                  card: CardFrame(center: CGPoint(x: 700, y: 640), size: CGSize(width: 360, height: 252), minimized: true),
                                  tint: Theme.curve(1))
+            g.tintIndex = 1
             apply(latex: g.latex, to: g)
             functions.append(g)
         }
@@ -1087,5 +1148,92 @@ extension AppModel {
         if let integral = functions.first(where: { $0.solution?.operation == .integral }) { selection = .formula(integral.id) }
         f.card.size = CGSize(width: 430, height: 330)
         f.card.center = CGPoint(x: max(f.anchor.x, 640) + 24 + 215, y: max(f.anchor.y - 12 - 165, topInset + 175))
+    }
+}
+
+// MARK: - 存盘、打开（多份草稿）
+
+extension AppModel {
+    /// 纸上的东西（笔迹另存）。算出来的结果不存：重新打开时按 LaTeX 重新求。
+    func snapshot() -> BoardSnapshot {
+        var index: [UUID: Int] = [:]
+        for (i, f) in functions.enumerated() { index[f.id] = i }
+        let fs = functions.map { (f: FunctionItem) -> FunctionSnapshot in
+            let kind: FunctionSnapshot.Kind = f.derivedFrom != nil ? .derivative : f.solveSource != nil ? .solve : .function
+            var params: [String: Double] = [:]
+            for p in f.graph?.params ?? [] { params[p.name] = p.value }
+            return FunctionSnapshot(kind: kind, lineID: f.lineID, latex: f.latex, origin: f.origin, fontSize: f.fontSize, size: f.size,
+                                    card: CardSnapshot(f.card), tintIndex: f.tintIndex, showsSliders: f.showsSliders, minimal: f.minimal,
+                                    engine: f.engine, ms: f.ms, ink: PKDrawing(strokes: f.ink).dataRepresentation(),
+                                    parent: f.derivedFrom.flatMap { index[$0] }, request: f.request, solveSource: f.solveSource,
+                                    params: params, reveal: f.graph?.reveal ?? false)
+        }
+        let ss = shapes.map { (s: ShapeItem) -> ShapeSnapshot in
+            ShapeSnapshot(figure: s.figure, group: s.group, ink: PKDrawing(strokes: s.ink).dataRepresentation(), showsLabels: s.showsLabels)
+        }
+        let gs = geometries.map { (g: GeometryItem) -> GeometrySnapshot in
+            GeometrySnapshot(geometry: g.geometry, points: g.scene.freePoints, card: CardSnapshot(g.card),
+                             ink: PKDrawing(strokes: g.ink).dataRepresentation())
+        }
+        return BoardSnapshot(functions: fs, shapes: ss, geometries: gs, lineNumbers: lineNumbers, scrollY: scrollOffset.y)
+    }
+
+    /// 纸上的笔迹（PKDrawing 数据）。
+    var drawingData: Data { drawing.dataRepresentation() }
+
+    /// 打开一份草稿：先放笔迹，再一条条重建式子（函数 → 导数 → 求解），最后按存的样子摆卡片。
+    func restore(_ snap: BoardSnapshot?, drawing d: PKDrawing) {
+        menu = nil
+        selection = nil
+        functions = []
+        shapes = []
+        geometries = []
+        lineNumbers = snap?.lineNumbers ?? [:]
+        setDrawing(d)
+        guard let snap else { return }
+        func strokes(_ data: Data) -> [PKStroke] { (try? PKDrawing(data: data))?.strokes ?? [] }
+
+        var items: [FunctionItem] = []
+        for s in snap.functions {
+            let tint = s.tintIndex >= 0 ? Theme.curve(s.tintIndex) : Theme.ok
+            let item = FunctionItem(lineID: s.lineID, latex: s.latex, origin: s.origin, fontSize: s.fontSize, size: s.size,
+                                    card: s.card.frame, tint: tint)
+            item.tintIndex = s.tintIndex
+            item.showsSliders = s.showsSliders
+            item.minimal = s.minimal
+            item.engine = s.engine
+            item.ms = s.ms
+            item.ink = strokes(s.ink)
+            if s.kind == .solve { item.solveSource = s.solveSource ?? s.latex }
+            items.append(item)
+        }
+        functions = items
+        for (s, item) in zip(snap.functions, items) where s.kind == .function {
+            apply(latex: s.latex, to: item)
+            for (name, value) in s.params { item.graph?.setParam(name, to: value) }
+        }
+        for (s, item) in zip(snap.functions, items) where s.kind == .derivative {
+            if let p = s.parent, items.indices.contains(p), let r = s.request {
+                setDerivative(item, request: r, parent: items[p])
+            }
+        }
+        recomputeSolutions(using: nil)
+        // 求导、求解时会把原函数的卡片展开、标上导函数：按存的样子摆回去
+        for (s, item) in zip(snap.functions, items) {
+            item.card = s.card.frame
+            item.origin = s.origin
+            item.graph?.reveal = s.reveal
+        }
+        shapes = snap.shapes.map { (s: ShapeSnapshot) -> ShapeItem in
+            let item = ShapeItem(figure: s.figure, group: s.group, ink: strokes(s.ink))
+            item.showsLabels = s.showsLabels
+            return item
+        }
+        geometries = snap.geometries.map { (g: GeometrySnapshot) -> GeometryItem in
+            let item = GeometryItem(geometry: g.geometry, ink: strokes(g.ink), card: g.card.frame)
+            item.scene.freePoints = g.points
+            return item
+        }
+        growPage()
     }
 }

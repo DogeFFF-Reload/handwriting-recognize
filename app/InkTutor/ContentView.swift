@@ -2,59 +2,182 @@ import InkCore
 import SceneUI
 import SwiftUI
 
-/// 整屏一张纸。顶上浮着工具栏；不再分左右半屏，函数图像是挂在式子右上角的卡片。
+/// 最外面一层：草稿画廊（参考无边记），点一份草稿打开。
+/// CI 截图用启动参数 `-demo <名字>`：直接打开一张不存盘的演示纸；`-demo gallery` 是放了几份示例草稿的画廊。
 struct ContentView: View {
+    @State private var library: BoardLibrary
+    @State private var open: BoardMeta?
+    private let demo: String?
+
+    init() {
+        let args = ProcessInfo.processInfo.arguments
+        let demo = args.firstIndex(of: "-demo").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+        self.demo = demo
+        if demo == "gallery" {
+            // 演示画廊：放在临时目录，不碰真的草稿
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("DemoBoards", isDirectory: true)
+            try? FileManager.default.removeItem(at: tmp)
+            _library = State(initialValue: BoardLibrary.demo(at: tmp))
+        } else {
+            _library = State(initialValue: BoardLibrary())
+        }
+    }
+
+    var body: some View {
+        if let demo, demo != "gallery" {
+            BoardScreen(library: library, meta: nil, demo: demo, onClose: {})
+        } else {
+            NavigationStack {
+                GalleryView(library: library) { open = $0 }
+                    .navigationDestination(item: $open) { meta in
+                        BoardScreen(library: library, meta: meta, demo: nil) { open = nil }
+                            .toolbar(.hidden, for: .navigationBar)
+                            .navigationBarBackButtonHidden()
+                    }
+            }
+            .tint(Theme.accent)
+        }
+    }
+}
+
+/// 一份草稿：整屏一张可以上下滚的纸，顶上浮着工具栏；函数图像是挂在式子右上角的卡片。
+/// 打开时读出来，开着的时候每 3 秒有变化就存，离开、切到后台时存并截缩略图。
+struct BoardScreen: View {
+    let library: BoardLibrary
+    /// nil：演示纸，不存盘。
+    let meta: BoardMeta?
+    let demo: String?
+    var onClose: () -> Void
+
     @State private var app = AppModel()
     @State private var showSettings = false
+    @State private var renaming = false
+    @State private var newName = ""
+    @State private var lastSaved: (board: Data, drawing: Data)?
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("allowFinger") private var allowFinger = false
     @AppStorage("engine") private var engine = "auto"
     @AppStorage("dashscopeKey") private var dashscopeKey = ""
     @AppStorage("serverURL") private var serverURL = ""
 
+    private var title: String {
+        guard let meta else { return "演示" }
+        return library.meta(meta.id)?.title ?? meta.title
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             GeometryReader { geo in
                 ZStack(alignment: .topLeading) {
-                    PaperBackground()
+                    PaperBackground(app: app)
                     PencilCanvas(app: app, eraserOn: app.eraserOn, penColor: app.penColor, penWidth: app.penWidth,
-                                 allowFinger: allowFinger)
+                                 allowFinger: allowFinger, contentHeight: app.contentHeight)
                     if !app.hasInk, app.functions.isEmpty, app.geometries.isEmpty, app.shapes.isEmpty {
                         EmptyBoardHint()
                             .position(x: geo.size.width / 2, y: geo.size.height * 0.46)
                             .transition(.opacity)
                     }
-                    BoardOverlay(app: app)
+                    ScrollingOverlay(app: app)
                 }
-                .coordinateSpace(name: Board.space)
-                .onAppear { app.boardSize = geo.size }
-                .onChange(of: geo.size) { _, s in app.boardSize = s }
+                .onAppear {
+                    app.boardSize = geo.size
+                    app.growPage()
+                }
+                .onChange(of: geo.size) { _, s in
+                    app.boardSize = s
+                    app.growPage()
+                }
             }
             .ignoresSafeArea()
 
-            TopBar(app: app, engine: AppModel.engineLabel(pref: engine, key: dashscopeKey, server: serverURL)) {
+            TopBar(app: app, engine: AppModel.engineLabel(pref: engine, key: dashscopeKey, server: serverURL),
+                   title: title, onBack: { close() }, onRename: meta.map { _ in startRename }) {
                 showSettings = true
             }
             .padding(.top, 8)
         }
         .animation(.easeOut(duration: 0.25), value: app.hasInk)
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .alert("重命名草稿", isPresented: $renaming) {
+            TextField("草稿名字", text: $newName)
+            Button("好") { if let meta { library.rename(meta.id, to: newName) } }
+            Button("取消", role: .cancel) {}
+        }
         .task {
-            // CI 截图：启动参数 -demo <名字>
-            let args = ProcessInfo.processInfo.arguments
-            if let i = args.firstIndex(of: "-demo"), i + 1 < args.count {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                app.loadDemo(args[i + 1])
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if let demo {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                app.loadDemo(demo)
+                return
+            }
+            guard let meta else { return }
+            let (snap, drawing) = library.read(meta.id)
+            app.restore(snap, drawing: drawing)
+            lastSaved = (try? BoardLibrary.encoder.encode(app.snapshot())).map { ($0, app.drawingData) }
+            if let y = snap?.scrollY, y > 0 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                app.scroll(to: y)
+            }
+            // 开着的时候每 3 秒看一次，有变化就存
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                save(thumbnail: false)
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { save(thumbnail: true) }
+        }
+    }
+
+    private func startRename() {
+        newName = title
+        renaming = true
+    }
+
+    /// 回画廊：收起菜单和选中框，截一张缩略图，存好再走。
+    private func close() {
+        app.dismissMenu()
+        app.selection = nil
+        DispatchQueue.main.async {
+            save(thumbnail: true)
+            onClose()
+        }
+    }
+
+    private func save(thumbnail: Bool) {
+        guard let meta, let board = try? BoardLibrary.encoder.encode(app.snapshot()) else { return }
+        let drawing = app.drawingData
+        let changed = lastSaved.map { $0.board != board || $0.drawing != drawing } ?? true
+        guard changed || thumbnail else { return }
+        let image = thumbnail ? BoardThumbnail.capture() : nil
+        library.write(meta.id, board: board, drawing: drawing, thumbnail: image)
+        lastSaved = (board, drawing)
     }
 }
 
-/// 横线纸，左边一道淡红的页边线。只是书写引导，分段由笔迹自己算。
-struct PaperBackground: View {
+/// 式子、卡片、图形那一层：用画布坐标摆放，纸滚多少它就移多少。只有这一层读 scrollOffset，滚动时别的不重算。
+private struct ScrollingOverlay: View {
+    var app: AppModel
+
     var body: some View {
+        BoardOverlay(app: app)
+            .frame(width: app.boardSize.width, height: max(app.contentHeight, app.boardSize.height), alignment: .topLeading)
+            .coordinateSpace(name: Board.space)
+            .offset(x: -app.scrollOffset.x, y: -app.scrollOffset.y)
+    }
+}
+
+/// 横线纸，左边一道淡红的页边线，跟着笔迹一起滚。只是书写引导，分段由笔迹自己算。
+struct PaperBackground: View {
+    var app: AppModel
+
+    var body: some View {
+        let offset = app.scrollOffset.y
         Canvas { ctx, size in
+            // 第一条线在纸上 y = 132，往下每 76 一条；只画看得见的
             var rules = Path()
-            var y: CGFloat = 132
+            let first = max(0, ((offset - 132) / 76).rounded(.up))
+            var y: CGFloat = 132 + first * 76 - offset
             while y < size.height {
                 rules.move(to: CGPoint(x: 0, y: y))
                 rules.addLine(to: CGPoint(x: size.width, y: y))
