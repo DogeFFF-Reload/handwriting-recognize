@@ -28,6 +28,10 @@ struct BoardOverlay: View {
             ForEach(app.functions) { item in
                 FunctionCard(item: item, app: app)
             }
+            // 批改：圈画在学生自己的笔迹上，那句话浮在卡片上面
+            ForEach(app.checks) { item in
+                CheckView(item: item, app: app)
+            }
 
             // 式子的操作条画在卡片上面，不会被挂在右上角的卡片挡住
             if case .formula(let id)? = app.selection, let item = app.functions.first(where: { $0.id == id }), !item.showingInk {
@@ -253,6 +257,125 @@ private struct BarButton: View {
     }
 }
 
+// MARK: - 批改
+
+/// 「批改」画在学生自己的笔迹上：错的那一项画一个红圈，对了在行尾打一个绿勾。
+/// 先圈后字：圈 0.35 秒画完，旁边那句话再出来（对了的那句过几秒自己收起）。
+/// 批改之后这一行又动了笔，圈收起来，换成一句「改好后双击」。
+struct CheckView: View {
+    @Bindable var item: CheckItem
+    var app: AppModel
+    @State private var drawn = false
+    @State private var talking = false
+
+    private var tint: Color { item.ok ? Theme.ok : Theme.wrong }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if item.stale {
+                staleHint
+            } else {
+                if item.ok {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: min(max(item.band.height * 0.6, 24), 48), weight: .bold))
+                        .foregroundStyle(Theme.ok)
+                        .scaleEffect(drawn ? 1 : 0.3)
+                        .opacity(drawn ? 1 : 0)
+                        .position(x: item.band.maxX + 34, y: item.band.midY)
+                        .allowsHitTesting(false)
+                }
+                ForEach(item.marks) { mark in
+                    let r = mark.rect.insetBy(dx: -9, dy: -8)
+                    Ellipse()
+                        .trim(from: 0, to: drawn ? 1 : 0)
+                        .stroke(Theme.wrong, style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
+                        .frame(width: r.width, height: r.height)
+                        .rotationEffect(.degrees(-3))
+                        .position(x: r.midX, y: r.midY)
+                        .allowsHitTesting(false)
+                }
+                if talking, let message = item.message {
+                    bubble(message)
+                        .scaleEffect(app.compact ? 0.86 : 1, anchor: .topLeading)
+                        .pinned(.topLeading, at: bubbleAnchor)
+                        .transition(.opacity.combined(with: .offset(y: -6)))
+                }
+            }
+        }
+        .onAppear(perform: play)
+    }
+
+    private func play() {
+        withAnimation(.easeOut(duration: 0.35)) { drawn = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) { talking = true }
+        }
+        if item.ok {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) {
+                withAnimation(.easeOut(duration: 0.3)) { talking = false }
+            }
+        }
+    }
+
+    /// 那句话放在这一行下面，从圈的左边开始；不跑到屏幕外。
+    private var bubbleAnchor: CGPoint {
+        let v = app.visibleRect
+        let x0 = (item.ok ? item.band.minX : item.marks.first?.rect.minX ?? item.band.minX) - 12
+        let x = min(max(x0, v.minX + 16), v.maxX - 340)
+        return CGPoint(x: max(x, v.minX + 16), y: item.band.maxY + 16)
+    }
+
+    private func bubble(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: item.ok ? "checkmark.circle.fill" : item.socratic ? "questionmark.bubble.fill" : "lightbulb.fill")
+                .font(.system(size: 17))
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let answer = item.answerLatex {
+                    MathLabel(answer, fontSize: 20, color: UIColor(Theme.ok))
+                        .fixedSize()
+                }
+            }
+            .frame(width: 260, alignment: .leading)
+            Button {
+                app.dismissCheck(item)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("收起批改")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(tint.opacity(0.35)))
+        .shadow(color: .black.opacity(0.1), radius: 10, y: 4)
+    }
+
+    private var staleHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "scribble.variable").foregroundStyle(Theme.accent)
+            Text("改好后双击笔身，选「批改」").font(.footnote)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 32)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.hairline))
+        .pinned(.topLeading, at: CGPoint(x: item.band.minX, y: item.band.maxY + 12))
+        .allowsHitTesting(false)
+        .transition(.opacity)
+    }
+}
+
 // MARK: - 识别中、淡出、提示
 
 /// 正在识别的那一段：一层淡淡的底色，一道光扫过去，右下角写「识别中」。
@@ -273,7 +396,7 @@ private struct BusyOverlay: View {
             .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.mini)
-                    Text(job.kind == .solve ? "计算中" : "识别中").font(.caption2.weight(.semibold))
+                    Text(job.kind == .solve ? "计算中" : job.kind == .check ? "批改中" : "识别中").font(.caption2.weight(.semibold))
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(.regularMaterial, in: Capsule())

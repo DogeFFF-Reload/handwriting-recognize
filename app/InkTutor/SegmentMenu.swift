@@ -1,7 +1,7 @@
 import InkCore
 import SwiftUI
 
-/// 双击笔身后在笔尖旁弹出的菜单：函数 / 求解 / 几何。
+/// 双击笔身后在笔尖旁弹出的菜单：函数 / 求解 / 批改 / 几何。
 /// 识别结果里有矩阵时再加一枚「矩阵」，点开是计算、求逆矩阵、求行列式。
 ///
 /// 圆钮沿笔尖上方的一段圆弧展开（右手握笔时手在笔尖右下，不会挡住）；
@@ -24,7 +24,7 @@ struct SegmentMenu: View {
     private var size: CGFloat { compact ? 46 : 64 }
 
     private var kinds: [SegmentKind] {
-        var list: [SegmentKind] = [.function, .solve]
+        var list: [SegmentKind] = [.function, .solve, .check]
         if state.offersMatrix { list.append(.matrix) }
         list.append(.geometry)
         return list
@@ -80,7 +80,7 @@ struct SegmentMenu: View {
         }
     }
 
-    /// 圆钮绕笔尖展开成扇形。三个时间隔 50°，多了「矩阵」就稍收一点。
+    /// 圆钮绕笔尖展开成扇形。三个时间隔 50°，四个以上（批改、矩阵）稍收一点。
     /// 优先往右上方展开，选第一个既不压住这段笔迹、也不出屏幕、不钻到工具栏下面的。
     private func fan(_ count: Int) -> [CGPoint] {
         let a = state.anchor
@@ -203,6 +203,8 @@ struct SegmentMenu: View {
                 Text("∫").font(.system(size: 22, design: .serif).italic())
                 Text("Σ").font(.system(size: 13, design: .serif)).baselineOffset(-1)
             }
+        case .check:
+            Image(systemName: "checkmark.circle").font(.system(size: 19, weight: .medium))
         case .geometry:
             Image(systemName: "triangle").font(.system(size: 18, weight: .medium))
         case .matrix:

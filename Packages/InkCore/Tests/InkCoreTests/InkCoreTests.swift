@@ -404,3 +404,63 @@ final class MathEngineGradingTests: XCTestCase {
         XCTAssertNil(grade("f(x)=x^3-3x", "\\int x"))
     }
 }
+
+/// App 的「批改」：MyScript 吐出来的写法、socratic 的反问、非多项式的数值后备。
+final class GradeTests: XCTestCase {
+    private func line(_ id: String = "C1") -> InkLine {
+        InkLine(id: id, revision: 1, mode: .derivative, band: CGRect(x: 10, y: 95, width: 260, height: 65),
+                strokes: [InkStroke(id: "s1", bounds: CGRect(x: 10, y: 95, width: 260, height: 65), createdAt: Date())],
+                removedStrokeIDs: [])
+    }
+
+    func testMyScriptLatexIsGraded() throws {
+        let f = MathEngineGrading.polynomialLatex([3: 1, 1: -3])
+        XCTAssertEqual(f, "x^{3}-3x")
+        let wrong = try XCTUnwrap(MathEngineGrading.grade(line: line(), functionLatex: f,
+                                                          derivativeLatex: "f^{\\prime}\\left( x\\right) =3x^{2}-3x"))
+        XCTAssertFalse(wrong.annotation.ok)
+        XCTAssertEqual(wrong.annotation.errors.first?.wrongLatex, "-3x")
+        XCTAssertEqual(wrong.annotation.errors.first?.expectedLatex, "-3")
+        XCTAssertNil(wrong.question)
+        let right = try XCTUnwrap(MathEngineGrading.grade(line: line(), functionLatex: f,
+                                                          derivativeLatex: "f^{\\prime}\\left( x\\right) =3x^{2}-3"))
+        XCTAssertTrue(right.annotation.ok)
+        // 顺序、\\cdot、y' 也认
+        XCTAssertEqual(MathEngineGrading.grade(line: line(), functionLatex: f, derivativeLatex: "y'=-3+3\\cdot x^2")?.annotation.ok, true)
+    }
+
+    func testSocraticAsksWithoutGivingTheAnswer() throws {
+        let g = try XCTUnwrap(MathEngineGrading.grade(line: line(), functionLatex: "x^3-3x",
+                                                      derivativeLatex: "f'(x)=3x^2-3x", mode: .socratic))
+        XCTAssertFalse(g.annotation.ok)
+        XCTAssertNil(g.annotation.errors.first?.expectedLatex)
+        XCTAssertNil(g.annotation.explanation)
+        XCTAssertEqual(g.question, "−3x 这一项求导后还剩什么？")
+        for (f, d) in [("x^3-3x", "f'(x)=x^2-3"), ("x^2+5", "f'(x)=2x+5"), ("x^3-3x+5", "f'(x)=3x^2"), ("x^2", "f'(x)=-2x")] {
+            let q = try XCTUnwrap(MathEngineGrading.grade(line: line(), functionLatex: f, derivativeLatex: d, mode: .socratic)?.question)
+            XCTAssertLessThanOrEqual(q.count, 40, q)
+            XCTAssertFalse(q.contains("答案"), q)
+        }
+    }
+
+    func testDecimalCoefficientsAfterSlider() throws {
+        let f = MathEngineGrading.polynomialLatex([3: 1.5, 1: -2])
+        XCTAssertEqual(f, "1.5x^{3}-2x")
+        XCTAssertEqual(MathEngineGrading.grade(line: line(), functionLatex: f, derivativeLatex: "f'(x)=4.5x^2-2")?.annotation.ok, true)
+        XCTAssertEqual(MathEngineGrading.grade(line: line(), functionLatex: f, derivativeLatex: "f'(x)=4.5x^2-2x")?.annotation.ok, false)
+    }
+
+    func testNumericFallbackForNonPolynomials() throws {
+        let sinx = try FunctionDefinition.parse("f(x)=x\\sin x")
+        let d = sinx.body.derivative("x")
+        XCTAssertEqual(DerivativeComparison.rightHandSide("f^{\\prime}\\left( x\\right) =\\sin x+x\\cos x"), "\\sin x+x\\cos x")
+        XCTAssertEqual(DerivativeComparison.matches(student: "\\sin x+x\\cos x", expected: d, variable: "x"), true)
+        XCTAssertEqual(DerivativeComparison.matches(student: "x\\cos x", expected: d, variable: "x"), false)
+        // 读不懂、或者多了别的字母：不下结论
+        XCTAssertNil(DerivativeComparison.matches(student: "\\sin x+a", expected: d, variable: "x"))
+        XCTAssertNil(DerivativeComparison.rightHandSide("f'(x)"))
+        let ex = try FunctionDefinition.parse("f(x)=e^{2x}")
+        XCTAssertEqual(DerivativeComparison.matches(student: "2e^{2x}", expected: ex.body.derivative("x"), variable: "x"), true)
+        XCTAssertEqual(DerivativeComparison.matches(student: "e^{2x}", expected: ex.body.derivative("x"), variable: "x"), false)
+    }
+}

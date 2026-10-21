@@ -28,6 +28,8 @@ final class AppModel {
     private(set) var geometries: [GeometryItem] = []
     /// 选「几何」认出来的图形（平面的、立体的），直接画在纸上。
     private(set) var shapes: [ShapeItem] = []
+    /// 选「批改」判过的行：学生自己写的 f'(x) = …，圈和说明画在笔迹上。
+    private(set) var checks: [CheckItem] = []
     /// 选中的式子或卡片（显示操作条或变换框）。
     var selection: Selection?
     /// 正在手动改 LaTeX 的式子（操作条上的「改式子」）。
@@ -64,6 +66,8 @@ final class AppModel {
     @ObservationIgnored private var seen: Set<String> = []
     @ObservationIgnored private var lineNumbers: [String: Int] = [:]
     @ObservationIgnored private var turnTask: Task<Void, Never>?
+    /// 正在批改的行 → 最新一次的 revision（识别回来时比一下，过期的不画）。
+    @ObservationIgnored private var pendingChecks: [String: Int] = [:]
 
     init() {
         // 装机时从控制台就能看出 MyScript 缺不缺证书 / 资源（xcrun devicectl … --console）
@@ -100,6 +104,7 @@ final class AppModel {
             f.inkIDs = f.inkIDs.filter { present.contains($0) }
         }
         functions.removeAll { $0.showingInk && $0.inkIDs.isEmpty && !hasStrokes(near: $0) }
+        updateChecks(present: present, added: added)
         refreshUndo()
         growPage()
     }
@@ -260,6 +265,9 @@ final class AppModel {
             } else {
                 recognizeMath(seg, kind)
             }
+        case .check:
+            let latex = m.recognized?.latex.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            startCheck(seg, recognized: m.liveRecognition && !latex.isEmpty ? m.recognized : nil)
         case .geometry:
             buildGeometry(seg)
         case .matrix:
@@ -408,6 +416,7 @@ final class AppModel {
         }
         recomputeDerivatives(of: item)
         recomputeSolutions(using: item.name)
+        staleChecks(of: item)
     }
 
     /// 函数卡片默认挂在式子右上角；贴边放不下时挪进屏幕，还是会压住式子就放到式子下面。
@@ -510,6 +519,8 @@ final class AppModel {
             }
             // 删掉的是求解：标在图像上的面积、点也去掉
             for f in functions { f.graph?.removeOverlay(id: item.id.uuidString) }
+            // 删掉的是函数：对照它批改的行没有可比的了
+            checks.removeAll { $0.parentID == item.id }
         }
         // 删掉的是函数：用到它的求解重新算（会提示它没有了）
         if !item.isComputed { recomputeSolutions(using: item.name) }
@@ -528,6 +539,7 @@ final class AppModel {
         item.rewriteFromTerms()
         recomputeDerivatives(of: item)
         recomputeSolutions(using: item.name)
+        staleChecks(of: item)
     }
 
     // MARK: 求导
@@ -611,6 +623,165 @@ final class AppModel {
                 setDerivative(child, request: request, parent: parent)
             }
         }
+    }
+
+    // MARK: 批改
+
+    /// 选「批改」：学生在函数下面自己写了 f'(x) = …，这次不替他算，判他写得对不对。
+    /// 笔迹留在纸上；错的那一项画红圈，圈好之后旁边冒出一句：默认（direct）是说明，带正确项；
+    /// 设置里打开「批改只提问」（socratic）是一句反问，屏幕上不出现正确导数。
+    /// 改对了打勾，原函数的卡片里才画出导函数、极值点和切线。
+    /// 多项式交给 MathEngine 逐项比对（圈得到那一项）；不是多项式（sin x、e^x……）就在一串点上比数值，只判整行。
+    private func startCheck(_ seg: InkSegment, recognized: RecognitionResult?) {
+        let below = CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24)
+        if seg.targetID != nil {
+            toast("这一行已经收成式子了：批改要在纸上手写 f'(x) = …", at: below, .info)
+            return
+        }
+        // 改完再批改同一行：沿用原来的行号（回放按「这一行擦过几轮」取）
+        let previous = checks.first { $0.band.insetBy(dx: -24, dy: -12).intersects(seg.bounds) }
+        let lineID = previous?.lineID ?? nextLineID("C")
+        let revision = (previous?.revision ?? 0) + 1
+        pendingChecks[lineID] = revision
+        let line = makeLine(lineID, revision: revision, mode: .derivative, seg)
+        if let r = recognized {
+            // 双击时已经认过：直接用，回放的行状态补记一笔
+            let position = Self.replayTracker.observe(lineID: line.id, mode: line.mode, strokeIDs: line.strokes.map(\.id))
+            if UserDefaults.standard.bool(forKey: "recordReplay") {
+                Self.replayRecorder.record(position, latex: r.latex)
+            }
+            finishCheck(seg, line: line, result: r)
+            return
+        }
+        let pk = seg.strokeIDs.compactMap { pkByID[$0] }
+        let job = BusySegment(bounds: seg.bounds, kind: .check)
+        busy.append(job)
+        let png = PencilKitBridge.png(of: line, in: drawing, ids: &ids)
+        let recognizer = Self.makeRecognizer(strokes: pk)
+        Task { @MainActor [weak self] in
+            defer { self?.busy.removeAll { $0.id == job.id } }
+            do {
+                let r = try await recognizer.recognize(line: line, imagePNG: png)
+                self?.finishCheck(seg, line: line, result: r)
+            } catch {
+                self?.toast("没认出来：\(AppModel.describe(error))", at: below, .warning)
+            }
+        }
+    }
+
+    private func finishCheck(_ seg: InkSegment, line: InkLine, result r: RecognitionResult) {
+        guard pendingChecks[line.id] == line.revision else { return }   // 又批改了一次，这次的结果过期了
+        pendingChecks[line.id] = nil
+        let below = CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24)
+        guard seg.strokeIDs.allSatisfy({ pkByID[$0] != nil }) else {
+            toast("识别时这段又改过了，改完再双击一次", at: below, .info)
+            return
+        }
+        let latex = r.latex.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !latex.isEmpty else {
+            toast("没认出来：写清楚一点再双击", at: below, .warning)
+            return
+        }
+        guard let request = DerivativeRequest.parse(latex), let rhs = DerivativeComparison.rightHandSide(latex) else {
+            toast("批改要写成 f'(x) = …，等号后面写你求出来的导数", at: below, .warning)
+            return
+        }
+        guard let parent = parentFunction(for: request, near: seg.bounds),
+              let d = functionTable()[parent.name] ?? parent.definition else {
+            toast("先写 \(request.name)(x) = …（双击后选「函数」），再写 \(request.name)'(x) = …", at: below, .warning)
+            return
+        }
+        let socratic = UserDefaults.standard.bool(forKey: "checkSocratic")
+        let item = CheckItem(lineID: line.id, revision: line.revision, strokeIDs: seg.strokeIDs, band: seg.bounds,
+                             latex: latex, parentID: parent.id)
+        item.socratic = socratic
+        item.engine = r.engine
+        item.ms = r.ms
+        let lhsLatex = request.lhsLatex(variable: d.variable)
+        let lhs = Explanation.pretty(lhsLatex).replacingOccurrences(of: "'", with: "′")
+
+        if request.order == 1, request.point == nil, d.variable == "x", let poly = d.polynomial,
+           let g = MathEngineGrading.grade(line: line, functionLatex: MathEngineGrading.polynomialLatex(poly),
+                                          derivativeLatex: latex, mode: socratic ? .socratic : .direct) {
+            item.ok = g.annotation.ok
+            item.marks = g.annotation.errors.compactMap(\.rect).map { CheckMark(rect: $0) }
+            if !item.ok {
+                if socratic {
+                    item.message = g.question ?? "这一行再逐项求一次导？"
+                } else if let e = g.annotation.errors.first {
+                    item.message = g.annotation.explanation.map(Self.readable)
+                        ?? Explanation.generic(kind: e.kind, wrong: e.wrongLatex, expected: e.expectedLatex)
+                }
+            }
+        } else {
+            var expected = d.body
+            for _ in 0..<request.order { expected = expected.derivative(d.variable) }
+            if let p = request.point { expected = expected.substituting(d.variable, with: .number(p)) }
+            guard let same = DerivativeComparison.matches(student: rhs, expected: expected, variable: d.variable) else {
+                toast("等号后面没看懂：写清楚一点再双击", at: below, .warning)
+                return
+            }
+            item.ok = same
+            if !same {
+                item.marks = [CheckMark(rect: seg.bounds)]
+                if socratic {
+                    item.message = "这一行和 \(lhs) 对不上，从第一项开始再求一次？"
+                } else {
+                    item.message = "这一行不对，正确的是："
+                    item.answerLatex = lhsLatex + "=" + (request.point == nil ? expected.latex : MathExpr.formatNumber(expected.evaluate([:])))
+                }
+            }
+        }
+        if item.ok {
+            item.message = request.point == nil
+                ? "对了。导函数、极值点和切线画在 \(parent.name)(x) 的图像里。"
+                : "对了。"
+        }
+
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+            checks.removeAll { $0.lineID == item.lineID || $0.band.intersects(item.band) }
+            checks.append(item)
+            if item.ok, request.point == nil {
+                // 学生自己写对了，图像里才画出导函数、极值点和切线
+                parent.graph?.reveal = true
+                if parent.card.minimized { parent.card.minimized = false }
+            } else if !item.ok, !functions.contains(where: { $0.derivedFrom == parent.id }) {
+                // 写错了：图像里不能先把导函数画出来（那就是答案）
+                parent.graph?.reveal = false
+            }
+        }
+    }
+
+    /// 批改过的那一行又动了笔（擦掉一笔、在旁边补写）：圈和那句话先收起来，改完再双击批改。
+    /// 整行擦光了，这条批改也不要了。
+    private func updateChecks(present: Set<String>, added: [InkStroke]) {
+        for c in checks where !c.stale {
+            let zone = c.band.insetBy(dx: -24, dy: -12)
+            if c.strokeIDs.contains(where: { !present.contains($0) }) || added.contains(where: { $0.bounds.intersects(zone) }) {
+                withAnimation(.easeOut(duration: 0.2)) { c.stale = true }
+            }
+        }
+        func gone(_ c: CheckItem) -> Bool {
+            !c.strokeIDs.contains { present.contains($0) } && !strokes.contains { $0.bounds.intersects(c.band) }
+        }
+        if checks.contains(where: gone) {
+            withAnimation(.easeOut(duration: 0.2)) { checks.removeAll(where: gone) }
+        }
+    }
+
+    /// 原函数改了（改式子、拖滑条、重新识别）：对照它批改过的行作废，等重新批改。
+    private func staleChecks(of parent: FunctionItem) {
+        for c in checks where c.parentID == parent.id && !c.stale { c.stale = true }
+    }
+
+    /// 圈旁那句话上的「×」。
+    func dismissCheck(_ item: CheckItem) {
+        withAnimation(.easeOut(duration: 0.2)) { checks.removeAll { $0.id == item.id } }
+    }
+
+    /// 机器给的说明里可能夹着 LaTeX（x^{2}）：换成屏幕上好读的写法。
+    private static func readable(_ text: String) -> String {
+        text.contains("^") || text.contains("\\") ? Explanation.pretty(text) : text
     }
 
     // MARK: 求解
@@ -982,9 +1153,11 @@ final class AppModel {
             functions = []
             geometries = []
             shapes = []
+            checks = []
         }
         setDrawing(PKDrawing())
         lineNumbers = [:]
+        pendingChecks = [:]
         // 演示从头来：回放的行号重新从第 1 行数（Server 那边也一起）。
         Self.replayTracker.reset()
         if let s = URL(string: UserDefaults.standard.string(forKey: "serverURL") ?? ""), s.host != nil {
@@ -1147,6 +1320,10 @@ extension AppModel {
             loadShapesDemo(solids: name == "solids")
             return
         }
+        if name == "check" || name == "checked" {
+            loadCheckDemo(fixed: name == "checked")
+            return
+        }
         // 窗口化的样子（BoardScreen 按 -demo compact 强制成小号工具栏）
         if name == "compact" {
             loadDemo("reveal")
@@ -1268,6 +1445,26 @@ extension AppModel {
         }
     }
 
+    /// -demo check：f(x)=x³−3x，下面手写 f'(x)=3x²−3x 选「批改」，−3x 被圈出来，旁边一句说明。
+    /// -demo checked：改成 3x²−3 之后，行尾打勾，卡片里画出导函数、极值点和切线。
+    private func loadCheckDemo(fixed: Bool) {
+        clear()
+        let left: CGFloat = 120
+        setDrawing(PKDrawing(strokes: DemoInk.strokes("f(x)=x^3-3x", at: CGPoint(x: left, y: 226), height: 54)))
+        guard let seg = segment(near: nil) else { return }
+        finishFunction(seg, result: RecognitionResult(lineID: "F1", revision: 1, latex: "f\\left( x\\right) =x^{3}-3x", engine: "MyScript", ms: 164),
+                       target: nil, lineID: nextLineID("F"), revision: 1, ink: seg.strokeIDs.compactMap { pkByID[$0] })
+        var d = drawing
+        d.strokes.append(contentsOf: DemoInk.strokes(fixed ? "f'(x)=3x^2-3" : "f'(x)=3x^2-3x", at: CGPoint(x: left, y: 470), height: 54,
+                                                     start: Date(timeIntervalSinceReferenceDate: 800_000_100)))
+        setDrawing(d)
+        guard let seg2 = segment(near: nil) else { return }
+        let line = makeLine(nextLineID("C"), revision: 1, mode: .derivative, seg2)
+        pendingChecks[line.id] = 1
+        let latex = fixed ? "f^{\\prime}\\left( x\\right) =3x^{2}-3" : "f^{\\prime}\\left( x\\right) =3x^{2}-3x"
+        finishCheck(seg2, line: line, result: RecognitionResult(lineID: line.id, revision: 1, latex: latex, engine: "MyScript", ms: 131))
+    }
+
     private func loadSolveDemo() {
         clear()
         let left: CGFloat = 120
@@ -1334,6 +1531,9 @@ extension AppModel {
         functions = []
         shapes = []
         geometries = []
+        // 批改的圈不存盘：重新打开后要看就再双击批改一次
+        checks = []
+        pendingChecks = [:]
         lineNumbers = snap?.lineNumbers ?? [:]
         setDrawing(d)
         guard let snap else { return }

@@ -214,6 +214,7 @@ struct SettingsView: View {
     @AppStorage("serverURL") private var server = ""
     @AppStorage("allowFinger") private var allowFinger = false
     @AppStorage("recordReplay") private var recordReplay = false
+    @AppStorage("checkSocratic") private var checkSocratic = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -230,7 +231,16 @@ struct SettingsView: View {
                 } footer: {
                     Text("自动：MyScript 就绪就用它（设备上识别），认不出时再试百炼和 Server；都没有就回放。"
                          + "指定的引擎没配好（例如选了百炼却没填 Key）时也按这个顺序。"
-                         + "回放不看笔迹内容：第一条函数先当作 x^3-5x，改过笔迹之后当作 x^3-3x；选「求解」的那一行当作 f'(x)，按上面的函数直接求。")
+                         + "回放不看笔迹内容：第一条函数先当作 x^3-5x，改过笔迹之后当作 x^3-3x；选「求解」的那一行当作 f'(x)，按上面的函数直接求；"
+                         + "选「批改」的那一行先当作 f'(x)=3x^2-3x，擦改一轮之后当作 f'(x)=3x^2-3。")
+                }
+                Section {
+                    Toggle("批改只提问，不给正确答案", isOn: $checkSocratic)
+                } header: {
+                    Text("批改")
+                } footer: {
+                    Text("在函数下面手写 f'(x) = …，双击选「批改」。关着：圈出算错的那一项，旁边写出正确结果和原因。"
+                         + "打开：只圈出来、问一句，屏幕上不出现正确导数，学生自己改对为止。改对后图像里才画出导函数、极值点和切线。")
                 }
                 Section {
                     LabeledContent("状态") {
