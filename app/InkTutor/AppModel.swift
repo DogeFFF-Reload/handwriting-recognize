@@ -1291,7 +1291,13 @@ final class AppModel {
         }
         setDrawing(PKDrawing())
         lineNumbers = [:]
-        // 演示从头来：回放的行号重新从第 1 行数（Server 那边也一起）。
+        resetReplay()
+    }
+
+    /// 演示从头来（清空、打开一份草稿）：回放的行号重新从第 1 行数（Server 那边也一起）。
+    /// 行状态是整个 App 共用一份，每份草稿的行号（F1、D1…）和笔画 id（s1、s2…）却都从头数：
+    /// 不清掉的话，新草稿里的 F1 会被当成上一份的 F1 擦过一轮，回放直接放「改正以后」的那一步。
+    private func resetReplay() {
         Self.replayTracker.reset()
         if let s = URL(string: UserDefaults.standard.string(forKey: "serverURL") ?? ""), s.host != nil {
             var req = URLRequest(url: s.appendingPathComponent("replay/reset"))
@@ -1403,7 +1409,8 @@ final class AppModel {
         var chain: [InkRecognizer]
         switch pref {
         case "myscript": chain = [myscript].compactMap { $0 }
-        case "direct": chain = [qwen].compactMap { $0 }
+        // 直连百炼 = 千问优先：千问出错或结果为空时，退到设备端 MyScript，再到 Server（初赛文案写的「MyScript 离线兜底」）
+        case "direct": chain = [qwen, myscript, mac].compactMap { $0 }
         case "server": chain = [mac].compactMap { $0 }
         case "replay": chain = []
         default: chain = [myscript, qwen, mac].compactMap { $0 }
@@ -1769,6 +1776,7 @@ extension AppModel {
         geometries = []
         checks = []
         lineNumbers = snap?.lineNumbers ?? [:]
+        resetReplay()
         setDrawing(d)
         guard let snap else { return }
         func strokes(_ data: Data) -> [PKStroke] { (try? PKDrawing(data: data))?.strokes ?? [] }
