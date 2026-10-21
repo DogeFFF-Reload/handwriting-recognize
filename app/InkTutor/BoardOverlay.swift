@@ -37,7 +37,7 @@ struct BoardOverlay: View {
             // 式子的操作条画在卡片上面，不会被挂在右上角的卡片挡住
             if case .formula(let id)? = app.selection, let item = app.functions.first(where: { $0.id == id }), !item.showingInk {
                 FormulaActionBar(item: item, app: app)
-                    .scaleEffect(app.compact ? 0.86 : 1, anchor: .bottomLeading)
+                    .scaleEffect(chromeScale, anchor: .bottomLeading)
                     .pinned(.bottomLeading, at: CGPoint(x: item.frame.minX - 10, y: item.frame.minY - 14))
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
@@ -46,7 +46,7 @@ struct BoardOverlay: View {
             if case .shape(let id)? = app.selection, let item = app.shapes.first(where: { $0.id == id }) {
                 ShapeHandles(item: item, app: app)
                 ShapeInfoBar(item: item, app: app)
-                    .scaleEffect(app.compact ? 0.86 : 1, anchor: infoBarAlignment(item) == .topLeading ? .topLeading : .bottomLeading)
+                    .scaleEffect(chromeScale, anchor: infoBarAlignment(item) == .topLeading ? .topLeading : .bottomLeading)
                     .pinned(infoBarAlignment(item), at: infoBarAnchor(item))
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
@@ -54,19 +54,22 @@ struct BoardOverlay: View {
             ForEach(app.busy) { BusyOverlay(job: $0) }
 
             if let menu = app.menu {
-                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInset, compact: app.compact, onChoose: { app.choose($0) }, onMatrix: { app.chooseMatrix($0) })
+                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInsetOnPaper, compact: app.compact, zoom: app.zoom, onChoose: { app.choose($0) }, onMatrix: { app.chooseMatrix($0) })
                     .transition(.opacity)
             }
 
-            ForEach(app.toasts) { ToastView(toast: $0, visible: app.visibleRect) }
+            ForEach(app.toasts) { ToastView(toast: $0, visible: app.visibleRect, zoom: app.zoom) }
         }
     }
+
+    /// 操作条、信息条在屏幕上的大小：窗口化时小一号；纸放大缩小时反过来缩回去，屏幕上不变。
+    private var chromeScale: CGFloat { (app.compact ? 0.86 : 1) / app.zoom }
 
     /// 信息条放在图形上方；旋转手柄在上方时（多边形）放到下方，免得挡住手柄。
     private func barBelow(_ item: ShapeItem) -> Bool {
         let box = item.figure.bounds
         guard let r = item.figure.handles.first(where: { $0.role == .rotate }) else {
-            return box.minY < app.visibleRect.minY + app.topInset + 70
+            return box.minY < app.visibleRect.minY + app.topInsetOnPaper + 70 / app.zoom
         }
         return r.point.y < box.midY && box.maxY + 80 < app.visibleRect.maxY
     }
@@ -82,8 +85,8 @@ struct BoardOverlay: View {
         // 立体图形下方紧挨着是「拖动旋转」的手柄
         if case .solid = item.figure, below { gap = 66 }
         let v = app.visibleRect
-        let x = min(max(box.minX - 10, v.minX + 16), v.maxX - 560)
-        let y = below ? box.maxY + gap : max(box.minY - gap, v.minY + app.topInset + 8)
+        let x = min(max(box.minX - 10, v.minX + 16 / app.zoom), v.maxX - 560 / app.zoom)
+        let y = below ? box.maxY + gap : max(box.minY - gap, v.minY + app.topInsetOnPaper + 8 / app.zoom)
         return CGPoint(x: max(x, v.minX + 16), y: y)
     }
 }
@@ -117,6 +120,7 @@ struct FormulaView: View {
             .frame(height: 34)
             .background(.regularMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.hairline))
+            .scaleEffect(1 / app.zoom, anchor: .topLeading)
             .pinned(.topLeading, at: CGPoint(x: item.frame.minX, y: item.frame.maxY + 14))
             .transition(.opacity)
         } else {
@@ -263,17 +267,22 @@ private struct BarButton: View {
 
 // MARK: - 检查这一步
 
-/// 「检查」的结果画在学生自己的笔迹上：有问题的项一个红圈（像老师批改那样），下面一枚小条「这里再看看 · 提示」；
-/// 提示由学生自己点开，一级一级给（想一想 → 规则 → 答案）。全对时行尾一个绿勾。改过以后圈变淡，等着再检查。
+/// 「检查」的结果画在学生自己的笔迹上：有问题的地方一个红圈（像老师批改那样，先圈出来，0.35 秒画完），
+/// 下面一枚小条「这里再看看 · 提示」；提示由学生自己点开，一级一级给（想一想 → 规则 → 答案）。
+/// 全对时行尾一个绿勾。改过以后圈变淡，等着再检查。纸放大缩小时圈跟着笔迹走，提示条在屏幕上一样大。
 struct CheckMarks: View {
     var item: CheckItem
     var app: AppModel
+    @State private var drawn = false
+
+    /// 提示条、绿勾在屏幕上的大小：窗口化时小一号；纸放大缩小时反过来缩回去，屏幕上不变。
+    private var chrome: CGFloat { (app.compact ? 0.86 : 1) / app.zoom }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             if item.result.ok {
                 okBadge
-                    .scaleEffect(app.compact ? 0.86 : 1, anchor: .leading)
+                    .scaleEffect(chrome, anchor: .leading)
                     .pinned(.leading, at: CGPoint(x: item.bounds.maxX + 14, y: item.bounds.midY))
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             } else {
@@ -281,11 +290,22 @@ struct CheckMarks: View {
                     ring(issue.box, number: item.result.issues.count > 1 ? i + 1 : nil, focused: item.focus == i)
                 }
                 panel
-                    .scaleEffect(app.compact ? 0.86 : 1, anchor: .topLeading)
-                    .pinned(.topLeading, at: CGPoint(x: item.bounds.minX, y: item.bounds.maxY + 14))
+                    .scaleEffect(chrome, anchor: .topLeading)
+                    .pinned(.topLeading, at: panelAnchor)
                     .transition(.opacity.combined(with: .offset(y: -4)))
             }
         }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.35)) { drawn = true }
+        }
+    }
+
+    /// 提示条放在这一行下面，从第一个圈的左边开始；不跑到屏幕外（宽度按屏幕上的 360 换算）。
+    private var panelAnchor: CGPoint {
+        let v = app.visibleRect
+        let x0 = (item.result.issues.first?.box.minX ?? item.bounds.minX) - 12
+        let x = min(max(x0, v.minX + 16 / app.zoom), v.maxX - 360 / app.zoom)
+        return CGPoint(x: max(x, v.minX + 16 / app.zoom), y: item.bounds.maxY + 14)
     }
 
     /// 红圈：比错项的框大一圈，稍微歪一点，像手画的。框已经比那一项外扩了 8 pt：
@@ -294,6 +314,7 @@ struct CheckMarks: View {
         let r = box.insetBy(dx: -min(box.width * 0.05, 8) - 2, dy: -box.height * 0.12 - 3)
         return ZStack(alignment: .topTrailing) {
             Ellipse()
+                .trim(from: 0, to: drawn ? 1 : 0)
                 .stroke(Theme.wrong.opacity(item.stale ? 0.28 : 0.9), style: StrokeStyle(lineWidth: focused ? 3 : 2.4, lineCap: .round))
                 .rotationEffect(.degrees(-3))
             if let number {
@@ -302,6 +323,7 @@ struct CheckMarks: View {
                     .foregroundStyle(.white)
                     .frame(width: 18, height: 18)
                     .background(Theme.wrong.opacity(item.stale ? 0.4 : 1), in: Circle())
+                    .scaleEffect(1 / app.zoom)
                     .offset(x: 4, y: -4)
             }
         }
@@ -378,6 +400,7 @@ struct CheckMarks: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Theme.ok.opacity(0.3)))
         .opacity(item.stale ? 0.5 : 1)
+        .scaleEffect(drawn ? 1 : 0.6)
     }
 
     private var closeButton: some View {
@@ -396,6 +419,7 @@ struct CheckMarks: View {
 }
 
 /// 一处问题的提示：已经打开的几级一行一行列出来，下面是「再给一点提示」或「看答案」。
+/// 整行判错时，最后一级下面把正确结果排成式子。
 private struct HintCard: View {
     var item: CheckItem
     var index: Int
@@ -442,9 +466,15 @@ private struct HintCard: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background((k == 2 ? Theme.ok : Theme.accent).opacity(0.12), in: Capsule())
-                    Text(issue.hints[k])
-                        .font(.subheadline)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(issue.hints[k])
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if k == issue.hints.count - 1, let answer = issue.answerLatex {
+                            MathLabel(answer, fontSize: 20, color: UIColor(Theme.ok))
+                                .fixedSize()
+                        }
+                    }
                 }
                 .transition(.opacity.combined(with: .offset(y: -3)))
             }
@@ -530,6 +560,8 @@ private struct ToastView: View {
     let toast: Toast
     /// 看得见的那块纸（画布坐标）：提示不跑到屏幕外。
     var visible: CGRect
+    /// 纸放大了几倍：提示反过来缩回去，屏幕上始终一样大。
+    var zoom: CGFloat = 1
 
     private var icon: String {
         switch toast.style {
@@ -560,8 +592,9 @@ private struct ToastView: View {
         .overlay(Capsule().strokeBorder(tint.opacity(0.3)))
         .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
         .fixedSize()
-        .position(x: min(max(toast.point.x, visible.minX + 180), visible.maxX - 180),
-                  y: min(max(toast.point.y, visible.minY + 110), visible.maxY - 40))
+        .scaleEffect(1 / zoom)
+        .position(x: min(max(toast.point.x, visible.minX + 180 / zoom), visible.maxX - 180 / zoom),
+                  y: min(max(toast.point.y, visible.minY + 110 / zoom), visible.maxY - 40 / zoom))
         .allowsHitTesting(false)
         .transition(.scale(scale: 0.9).combined(with: .opacity))
     }

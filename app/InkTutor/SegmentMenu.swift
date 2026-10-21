@@ -14,13 +14,16 @@ struct SegmentMenu: View {
     var topInset: CGFloat
     /// 窗口化时整个菜单小一号。
     var compact = false
+    /// 纸放大了几倍。菜单整层跟着纸缩放，圆钮反过来缩回去，屏幕上始终一样大；距离按画布坐标换算。
+    var zoom: CGFloat = 1
     var onChoose: (SegmentKind) -> Void
     var onMatrix: (MatrixAction) -> Void
 
     @State private var shown = false
     @State private var phase: CGFloat = 0
 
-    private var radius: CGFloat { compact ? 68 : 92 }
+    private var radius: CGFloat { (compact ? 68 : 92) / zoom }
+    /// 圆钮在屏幕上的直径；在画布上占 size / zoom。
     private var size: CGFloat { compact ? 46 : 64 }
 
     private var kinds: [SegmentKind] {
@@ -55,14 +58,14 @@ struct SegmentMenu: View {
                 .strokeBorder(Theme.accent, lineWidth: 2)
                 .background(Circle().fill(Theme.accent.opacity(0.15)))
                 .frame(width: 18, height: 18)
-                .scaleEffect(shown ? 1 : 0.2)
+                .scaleEffect((shown ? 1 : 0.2) / zoom)
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: shown)
                 .position(state.anchor)
                 .allowsHitTesting(false)
 
             ForEach(Array(kinds.enumerated()), id: \.element) { i, kind in
                 option(kind)
-                    .scaleEffect(shown ? 1 : 0.3)
+                    .scaleEffect((shown ? 1 : 0.3) / zoom)
                     .opacity(shown ? 1 : 0)
                     .position(shown ? spots[i] : state.anchor)
                     .animation(.spring(response: 0.34, dampingFraction: 0.7).delay(Double(i) * 0.035), value: shown)
@@ -74,6 +77,7 @@ struct SegmentMenu: View {
                 let places = submenuSpots(from: spots[index], count: actions.count)
                 ForEach(Array(actions.enumerated()), id: \.element) { i, action in
                     matrixAction(action)
+                        .scaleEffect(1 / zoom)
                         .position(places[i])
                         .transition(.scale(scale: 0.7).combined(with: .opacity))
                 }
@@ -86,12 +90,13 @@ struct SegmentMenu: View {
         }
     }
 
-    /// 圆钮绕笔尖展开成扇形。三个时间隔 50°，四五个时收到 42°。
+    /// 圆钮绕笔尖展开成扇形。三个时间隔 50°，四五个（检查、矩阵）时收到 42°。
     /// 优先往右上方展开，选第一个既不压住这段笔迹、也不出屏幕、不钻到工具栏下面的。
     private func fan(_ count: Int) -> [CGPoint] {
         let a = state.anchor
         let ink = state.segment.bounds.insetBy(dx: -8, dy: -8)
-        let half: CGFloat = size / 2 + 2
+        let half: CGFloat = (size / 2 + 2) / zoom
+        let edge: CGFloat = 8 / zoom
         let step = count > 3 ? 42.0 : 50.0
         let offsets = (0..<count).map { step * (Double($0) - Double(count - 1) / 2) }
         func spots(_ center: Double) -> [CGPoint] {
@@ -103,20 +108,20 @@ struct SegmentMenu: View {
         func fits(_ ps: [CGPoint]) -> Bool {
             ps.allSatisfy { p in
                 let box = CGRect(x: p.x - half, y: p.y - half, width: 2 * half, height: 2 * half)
-                return !box.intersects(ink) && box.minX > visible.minX + 8 && box.maxX < visible.maxX - 8
-                    && box.minY > visible.minY + topInset && box.maxY < visible.maxY - 8
+                return !box.intersects(ink) && box.minX > visible.minX + edge && box.maxX < visible.maxX - edge
+                    && box.minY > visible.minY + topInset && box.maxY < visible.maxY - edge
             }
         }
         for center in [-60.0, -90, -30, 0, -120, -150, 180, 30, 150, 60, 120, 90] where fits(spots(center)) {
             return spots(center)
         }
         return spots(-90).map {
-            CGPoint(x: min(max($0.x, visible.minX + 44), visible.maxX - 44),
-                    y: min(max($0.y, visible.minY + topInset + 40), visible.maxY - 44))
+            CGPoint(x: min(max($0.x, visible.minX + 44 / zoom), visible.maxX - 44 / zoom),
+                    y: min(max($0.y, visible.minY + topInset + 40 / zoom), visible.maxY - 44 / zoom))
         }
     }
 
-    /// 二级菜单从「矩阵」再往外排开，不盖住那一圈主按钮。按钮之间隔 128（四个时收到 124）。
+    /// 二级菜单从「矩阵」再往外排开，不盖住那一圈主按钮。按钮之间隔 128（四个时收到 124），按屏幕上的距离算。
     private func submenuSpots(from matrix: CGPoint, count: Int) -> [CGPoint] {
         let vx = matrix.x - state.anchor.x
         let vy = matrix.y - state.anchor.y
@@ -125,13 +130,14 @@ struct SegmentMenu: View {
         let uy = vy / len
         let sx = -uy
         let sy = ux
-        let center = CGPoint(x: matrix.x + ux * 108, y: matrix.y + uy * 108)
-        let gap: CGFloat = count > 3 ? 124 : 128
+        let out: CGFloat = 108 / zoom
+        let gap: CGFloat = (count > 3 ? 124 : 128) / zoom
+        let center = CGPoint(x: matrix.x + ux * out, y: matrix.y + uy * out)
         return (0..<count).map { (i: Int) -> CGPoint in
             let k = CGFloat(i) - CGFloat(count - 1) / 2
             let p = CGPoint(x: center.x + sx * k * gap, y: center.y + sy * k * gap)
-            return CGPoint(x: min(max(p.x, visible.minX + 64), visible.maxX - 64),
-                           y: min(max(p.y, visible.minY + topInset + 22), visible.maxY - 22))
+            return CGPoint(x: min(max(p.x, visible.minX + 64 / zoom), visible.maxX - 64 / zoom),
+                           y: min(max(p.y, visible.minY + topInset + 22 / zoom), visible.maxY - 22 / zoom))
         }
     }
 

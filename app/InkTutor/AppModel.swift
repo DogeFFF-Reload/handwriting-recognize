@@ -28,7 +28,7 @@ final class AppModel {
     private(set) var geometries: [GeometryItem] = []
     /// 选「几何」认出来的图形（平面的、立体的），直接画在纸上。
     private(set) var shapes: [ShapeItem] = []
-    /// 选「检查」看过的几行（笔迹留着，画圈和提示）。不存盘。
+    /// 选「检查」看过的几行：学生自己写的 f'(x) = …，笔迹留着，圈和提示画在笔迹上。不存盘。
     private(set) var checks: [CheckItem] = []
     /// 选中的式子或卡片（显示操作条或变换框）。
     var selection: Selection?
@@ -50,15 +50,23 @@ final class AppModel {
     var topInset: CGFloat { compact ? 58 : 100 }
     /// 新函数卡片的默认大小。
     var defaultCardSize: CGSize { compact ? CGSize(width: 270, height: 196) : CGSize(width: 360, height: 252) }
-    /// 纸往上滚了多少（画布坐标 = 屏幕坐标 + scrollOffset）。式子、卡片、图形都放在画布坐标里，跟着纸一起滚。
+    /// 看得见的那块纸的左上角（画布坐标）。屏幕坐标 =（画布坐标 − scrollOffset）× zoom。
+    /// 式子、卡片、图形都放在画布坐标里，跟着纸一起滚、一起缩放。
     private(set) var scrollOffset: CGPoint = .zero
-    /// 纸有多长：至少三屏，写到靠近底下时自动接长。
+    /// 纸放大了几倍（两根手指捏合）。笔迹、式子、卡片都在画布坐标里不变，只是屏幕上看起来变大变小。
+    private(set) var zoom: CGFloat = 1
+    static let zoomRange: ClosedRange<CGFloat> = 0.5...3
+    /// 纸有多长、多宽（画布坐标）：上下、左右是同一个无边界的办法——至少三屏，比写到的最远处再多一屏，
+    /// 滚到靠近底边（右边）时再接一屏。
     private(set) var contentHeight: CGFloat = 0
-    /// 纸有多宽：至少一屏；窗口拉窄（或者转成竖屏）后，原来写在右边的东西还在纸上，纸跟着加宽、可以左右滚。
     private(set) var contentWidth: CGFloat = 0
 
-    /// 现在看得见的那块（画布坐标）：新卡片、菜单、提示都摆在这里面。
-    var visibleRect: CGRect { CGRect(origin: scrollOffset, size: boardSize) }
+    /// 现在看得见的那块（画布坐标）：新卡片、菜单、提示都摆在这里面。缩小时看得见的纸更大。
+    var visibleRect: CGRect {
+        CGRect(origin: scrollOffset, size: CGSize(width: boardSize.width / zoom, height: boardSize.height / zoom))
+    }
+    /// 顶上工具栏挡住的高度换成画布坐标（工具栏不跟着缩放）。
+    var topInsetOnPaper: CGFloat { topInset / zoom }
 
     @ObservationIgnored private weak var canvas: PKCanvasView?
     @ObservationIgnored private var drawing = PKDrawing()
@@ -68,6 +76,8 @@ final class AppModel {
     @ObservationIgnored private var seen: Set<String> = []
     @ObservationIgnored private var lineNumbers: [String: Int] = [:]
     @ObservationIgnored private var turnTask: Task<Void, Never>?
+    /// 正在检查的行 → 最新一次的 revision（识别回来时比一下，过期的不画）。
+    @ObservationIgnored private var pendingChecks: [String: Int] = [:]
 
     init() {
         // 装机时从控制台就能看出 MyScript 缺不缺证书 / 资源（xcrun devicectl … --console）
@@ -117,25 +127,38 @@ final class AppModel {
             let erased = c.strokeIDs.contains { !present.contains($0) }
             let wrote = added.contains { $0.bounds.intersects(reach) }
             if erased || wrote {
-                c.stale = true
-                c.focus = nil
+                withAnimation(.easeOut(duration: 0.2)) {
+                    c.stale = true
+                    c.focus = nil
+                }
             }
         }
-        checks.removeAll { c in
+        func gone(_ c: CheckItem) -> Bool {
             c.strokeIDs.isDisjoint(with: present) && !strokes.contains { $0.bounds.intersects(c.bounds) }
+        }
+        if checks.contains(where: gone) {
+            withAnimation(.easeOut(duration: 0.2)) { checks.removeAll(where: gone) }
         }
     }
 
     // MARK: 滚动
 
-    /// 画布滚动了（PencilCanvas 的 scrollViewDidScroll）。滚到靠近底下时纸接长一屏。
-    func scrolled(to offset: CGPoint) {
-        scrollOffset = offset
-        let h = boardSize.height
-        if offset.y + h > contentHeight - h * 0.5 { contentHeight = offset.y + 2 * h }
+    /// 画布滚动或缩放了（PencilCanvas 的 scrollViewDidScroll / scrollViewDidZoom）。
+    /// offset 是 UIScrollView 的 contentOffset（屏幕 point，已经乘过 zoom）。滚到靠近底下或右边时纸接长一屏。
+    func scrolled(to offset: CGPoint, zoom z: CGFloat) {
+        if zoom != z { zoom = z }
+        scrollOffset = CGPoint(x: offset.x / z, y: offset.y / z)
+        let v = visibleRect
+        if v.maxY > contentHeight - v.height * 0.5 { contentHeight = v.minY + 2 * v.height }
+        if v.maxX > contentWidth - v.width * 0.5 { contentWidth = v.minX + 2 * v.width }
     }
 
-    /// 纸至少三屏长，而且比写到的最下面再多一屏；宽度一般是一屏，写到窗口外面时加宽到最右边再留一点边。
+    /// 屏幕右下角的倍数按钮：点一下平滑回到 100%。
+    func resetZoom() {
+        canvas?.setZoomScale(1, animated: true)
+    }
+
+    /// 纸至少三屏长、三屏宽，而且比写到的最下面、最右边再多一屏（只接长，不缩回去）。
     func growPage() {
         var bottom = drawing.strokes.isEmpty ? 0 : drawing.bounds.maxY
         var right = drawing.strokes.isEmpty ? 0 : drawing.bounds.maxX
@@ -151,22 +174,28 @@ final class AppModel {
             bottom = max(bottom, g.card.center.y + g.card.size.height / 2)
             right = max(right, g.card.center.x + g.card.size.width / 2)
         }
-        let needed = max(3 * boardSize.height, bottom + boardSize.height)
-        if needed > contentHeight { contentHeight = needed }
-        let width = right > boardSize.width ? (right + 40).rounded(.up) : boardSize.width
-        if width != contentWidth { contentWidth = width }
+        let tall = max(3 * boardSize.height, bottom + boardSize.height)
+        if tall > contentHeight { contentHeight = tall }
+        let wide = max(3 * boardSize.width, right + boardSize.width)
+        if wide > contentWidth { contentWidth = wide }
     }
 
-    /// 程序滚到某个位置（打开草稿时回到上次看的地方、演示）。左右不动。
-    func scroll(to y: CGFloat) {
+    /// 程序滚到某个位置（打开草稿时回到上次看的地方、演示）。x、zoom 不给就不动。坐标是画布坐标。
+    func scroll(to y: CGFloat, x: CGFloat? = nil, zoom z: CGFloat? = nil) {
         growPage()
-        let target = CGPoint(x: max(0, min(scrollOffset.x, contentWidth - boardSize.width)),
-                             y: max(0, min(y, contentHeight - boardSize.height)))
-        if let canvas {
-            canvas.contentSize = CGSize(width: contentWidth, height: contentHeight)
-            canvas.setContentOffset(target, animated: false)
+        if let canvas, let z {
+            canvas.zoomScale = min(max(z, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
         }
-        scrolled(to: target)
+        let s = canvas?.zoomScale ?? zoom
+        let view = CGSize(width: boardSize.width / s, height: boardSize.height / s)
+        let target = CGPoint(x: max(0, min(x ?? scrollOffset.x, contentWidth - view.width)),
+                             y: max(0, min(y, contentHeight - view.height)))
+        let offset = CGPoint(x: target.x * s, y: target.y * s)
+        if let canvas {
+            canvas.contentSize = CGSize(width: contentWidth * s, height: contentHeight * s)
+            canvas.setContentOffset(offset, animated: false)
+        }
+        scrolled(to: offset, zoom: s)
     }
 
     private func hasStrokes(near f: FunctionItem) -> Bool {
@@ -297,7 +326,8 @@ final class AppModel {
                 recognizeMath(seg, kind)
             }
         case .check:
-            check(seg, preview: m.liveRecognition ? m.recognized : nil)
+            let latex = m.recognized?.latex.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            check(seg, preview: m.liveRecognition && !latex.isEmpty ? m.recognized : nil)
         case .geometry:
             buildGeometry(seg)
         case .matrix:
@@ -446,6 +476,7 @@ final class AppModel {
         }
         recomputeDerivatives(of: item)
         recomputeSolutions(using: item.name)
+        staleChecks(of: item)
     }
 
     /// 函数卡片默认挂在式子右上角；贴边放不下时挪进屏幕，还是会压住式子就放到式子下面。
@@ -454,7 +485,7 @@ final class AppModel {
         let v = visibleRect
         func clamped(_ c: CGPoint) -> CGPoint {
             let x = min(max(c.x, v.minX + size.width / 2 + 16), v.maxX - size.width / 2 - 16)
-            let y = min(max(c.y, v.minY + topInset + size.height / 2 + 8), v.maxY - size.height / 2 - 16)
+            let y = min(max(c.y, v.minY + topInsetOnPaper + size.height / 2 + 8), v.maxY - size.height / 2 - 16)
             return CGPoint(x: x, y: y)
         }
         var c = clamped(CGPoint(x: formula.maxX + 18 + size.width / 2, y: formula.minY - 14 - size.height / 2))
@@ -551,6 +582,8 @@ final class AppModel {
             }
             // 删掉的是求解：标在图像上的面积、点也去掉
             for f in functions { f.graph?.removeOverlay(id: item.id.uuidString) }
+            // 删掉的是函数：对照它检查的行没有可比的了
+            checks.removeAll { $0.parentID == item.id }
         }
         // 删掉的是函数：用到它的求解重新算（会提示它没有了）
         if !item.isComputed { recomputeSolutions(using: item.name) }
@@ -569,6 +602,7 @@ final class AppModel {
         item.rewriteFromTerms()
         recomputeDerivatives(of: item)
         recomputeSolutions(using: item.name)
+        staleChecks(of: item)
     }
 
     // MARK: 求导
@@ -656,15 +690,25 @@ final class AppModel {
 
     // MARK: 检查这一步
 
-    /// 选「检查」：学生在函数下面自己写的 f'(x) = …，和上面那条 f(x) 对一下。笔迹不收成式子；
-    /// 有问题的项画红圈，提示学生自己点开；全对时行尾打个绿勾。同一行改完再检查，沿用原来的行号。
+    /// 选「检查」：学生在函数下面自己写的 f'(x) = …（f'(2) = …、f''(x) = … 也行），和上面那条 f(x) 对一下，不替他算。
+    /// 笔迹留在纸上：有问题的地方画红圈，提示学生自己一级一级点开（想一想 → 规则 → 答案）；全对时行尾打勾，
+    /// 原函数的卡片里这时才画出导函数、极值点和切线。多项式逐项比（圈到那一项），不是多项式的整行比数值。
+    /// 同一行改完再检查，沿用原来的行号（回放按「这一行擦过几轮」取）。
     private func check(_ seg: InkSegment, preview: RecognitionResult?) {
+        let below = CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24)
+        if seg.targetID != nil {
+            toast("这一行已经收成式子了：检查要在纸上手写 f'(x) = …", at: below, .info)
+            return
+        }
         let members = Set(seg.strokeIDs)
-        let earlier = checks.first { !$0.strokeIDs.isDisjoint(with: members) || $0.bounds.intersects(seg.bounds) }
+        let earlier = checks.first {
+            !$0.strokeIDs.isDisjoint(with: members) || $0.bounds.insetBy(dx: -24, dy: -12).intersects(seg.bounds)
+        }
         let lineID = earlier?.lineID ?? nextLineID("C")
         let revision = (earlier?.revision ?? 0) + 1
+        pendingChecks[lineID] = revision
         let line = makeLine(lineID, revision: revision, mode: .derivative, seg)
-        if let r = preview, !r.latex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let r = preview {
             // 预识别不记回放的账，这里补上
             let position = Self.replayTracker.observe(lineID: line.id, mode: line.mode, strokeIDs: line.strokes.map(\.id))
             if UserDefaults.standard.bool(forKey: "recordReplay") { Self.replayRecorder.record(position, latex: r.latex) }
@@ -682,12 +726,14 @@ final class AppModel {
                 let r = try await recognizer.recognize(line: line, imagePNG: png)
                 self?.finishCheck(seg, line: line, result: r)
             } catch {
-                self?.toast("没认出来：\(AppModel.describe(error))", at: CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24), .warning)
+                self?.toast("没认出来：\(AppModel.describe(error))", at: below, .warning)
             }
         }
     }
 
     private func finishCheck(_ seg: InkSegment, line: InkLine, result r: RecognitionResult) {
+        guard pendingChecks[line.id] == line.revision else { return }   // 又检查了一次，这次的结果过期了
+        pendingChecks[line.id] = nil
         let below = CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24)
         guard seg.strokeIDs.allSatisfy({ pkByID[$0] != nil }) else {
             toast("识别时这段又改过了，改完再双击一次", at: below, .info)
@@ -699,39 +745,43 @@ final class AppModel {
             return
         }
         guard let request = DerivativeRequest.parse(latex) else {
-            toast("「检查」现在只看求导这一步：在 f(x) = … 下面写 f'(x) = …", at: below, .info)
+            toast("「检查」看的是求导这一步：在 f(x) = … 下面写 f'(x) = …", at: below, .info)
             return
         }
-        guard let parent = parentFunction(for: request, near: seg.bounds) else {
-            toast("先写 \(request.name)(x) = …（双击后选「函数」），再检查 \(request.name)'(x)", at: below, .warning)
+        // 参数取滑条上现在的值（f(x) = ax² 拖到 a = 2，就按 2x² 检查）
+        guard let parent = parentFunction(for: request, near: seg.bounds),
+              let d = functionTable()[parent.name] ?? parent.definition else {
+            toast("先写 \(request.name)(x) = …（双击后选「函数」），再检查 \(request.name)'(x) = …", at: below, .warning)
             return
         }
         let result: StepReview.Result
         do {
-            result = try StepReview.review(line: line, functionLatex: parent.latex, stepLatex: latex)
-        } catch let problem as StepReview.Problem {
-            let text: String
-            switch problem {
-            case .notADerivative: text = "等号后面还没写：写完 \(request.name)'(x) = … 再检查"
-            case .higherOrder: text = "「检查」现在只看一阶导数 \(request.name)'(x)"
-            case .unsupportedFunction: text = "「检查」现在只看多项式的求导，\(parent.name)(x) 不是多项式"
-            case .unreadable: text = "这一行没看清：写清楚一点再双击"
-            }
-            toast(text, at: below, .info)
+            result = try StepReview.review(line: line, function: d, stepLatex: latex)
+        } catch StepReview.Problem.notADerivative {
+            toast("等号后面还没写：写完 \(request.name)'(x) = … 再检查", at: below, .info)
             return
         } catch {
-            toast(Self.describe(error), at: below, .warning)
+            toast("等号后面没看懂：写清楚一点再双击", at: below, .warning)
             return
         }
         let members = Set(seg.strokeIDs)
         let item = CheckItem(lineID: line.id, revision: line.revision, strokeIDs: members, bounds: seg.bounds, result: result,
-                             functionName: parent.name, recognized: r)
+                             parentID: parent.id, functionName: parent.name, recognized: r)
         withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
-            checks.removeAll { !$0.strokeIDs.isDisjoint(with: members) || $0.bounds.intersects(seg.bounds) }
+            checks.removeAll { $0.lineID == item.lineID || !$0.strokeIDs.isDisjoint(with: members) || $0.bounds.intersects(seg.bounds) }
             checks.append(item)
+            if result.ok, request.point == nil {
+                // 学生自己写对了，图像里才画出导函数、极值点和切线
+                parent.graph?.reveal = true
+                if parent.card.minimized { parent.card.minimized = false }
+            } else if !result.ok, !functions.contains(where: { $0.derivedFrom == parent.id }) {
+                // 写错了：图像里不能先把导函数画出来（那就是答案）
+                parent.graph?.reveal = false
+            }
         }
         if result.ok {
-            toast("这一步对了", at: CGPoint(x: seg.bounds.maxX + 40, y: seg.bounds.minY - 24), .success)
+            let text = request.point == nil ? "对了：导函数、极值点和切线画在 \(parent.name)(x) 的图像里" : "这一步对了"
+            toast(text, at: CGPoint(x: seg.bounds.maxX + 40, y: seg.bounds.minY - 24), .success)
         }
     }
 
@@ -766,6 +816,14 @@ final class AppModel {
         let seg = InkSegment(strokeIDs: mine.map(\.id), bounds: InkSegmenter.bounds(of: mine), targetID: nil)
         dismiss(c)
         finishFromRecognition(seg, result: c.recognized, kind: .solve)
+    }
+
+    /// 原函数改了（改式子、拖滑条、重新识别）：对照它检查过的行作废，等重新检查。
+    private func staleChecks(of parent: FunctionItem) {
+        for c in checks where c.parentID == parent.id && !c.stale {
+            c.stale = true
+            c.focus = nil
+        }
     }
 
     // MARK: 求解
@@ -1291,6 +1349,7 @@ final class AppModel {
         }
         setDrawing(PKDrawing())
         lineNumbers = [:]
+        pendingChecks = [:]
         // 演示从头来：回放的行号重新从第 1 行数（Server 那边也一起）。
         Self.replayTracker.reset()
         if let s = URL(string: UserDefaults.standard.string(forKey: "serverURL") ?? ""), s.host != nil {
@@ -1445,15 +1504,12 @@ extension AppModel {
     /// - reveal：f(x)=x²−4，下面写 f'(x) 求出来的 2x，卡片里画出导函数
     /// - solve：f(x)=x²−4，下面写 ∫_0^2 f(x)dx（卡片里涂出面积）、lim_{x→0} sin x / x、∑_{k=1}^n k²，选「求解」
     /// - check：f(x)=x³−3x 下面自己写 f'(x)=3x²−3x，选「检查」：圈出 −3x，打开第一级提示
+    /// - checked：改成 3x²−3 再检查：行尾打勾，卡片里画出导函数、极值点和切线
     /// - transform：A=(2 0; 0 1) 选「看变换」：单位正方形横向拉长两倍
     /// - compare：f(x)=x² 和 g(x)=2x+3 画进同一张图：交点、两曲线之间的面积
     func loadDemo(_ name: String) {
         if name == "solve" {
             loadSolveDemo()
-            return
-        }
-        if name == "check" {
-            loadCheckDemo()
             return
         }
         if name == "transform" {
@@ -1466,6 +1522,10 @@ extension AppModel {
         }
         if name == "shapes" || name == "solids" {
             loadShapesDemo(solids: name == "solids")
+            return
+        }
+        if name == "check" || name == "checked" {
+            loadCheckDemo(fixed: name == "checked")
             return
         }
         // 窗口化的样子（BoardScreen 按 -demo compact 强制成小号工具栏）
@@ -1589,6 +1649,27 @@ extension AppModel {
         }
     }
 
+    /// -demo check：f(x)=x³−3x，下面手写 f'(x)=3x²−3x 选「检查」，−3x 被圈出来，打开第一级提示（一句反问）。
+    /// -demo checked：改成 3x²−3 之后，行尾打勾，卡片里画出导函数、极值点和切线。
+    private func loadCheckDemo(fixed: Bool) {
+        clear()
+        let left: CGFloat = 120
+        setDrawing(PKDrawing(strokes: DemoInk.strokes("f(x)=x^3-3x", at: CGPoint(x: left, y: 226), height: 54)))
+        guard let seg = segment(near: nil) else { return }
+        finishFunction(seg, result: RecognitionResult(lineID: "F1", revision: 1, latex: "f\\left( x\\right) =x^{3}-3x", engine: "MyScript", ms: 164),
+                       target: nil, lineID: nextLineID("F"), revision: 1, ink: seg.strokeIDs.compactMap { pkByID[$0] })
+        var d = drawing
+        d.strokes.append(contentsOf: DemoInk.strokes(fixed ? "f'(x)=3x^2-3" : "f'(x)=3x^2-3x", at: CGPoint(x: left, y: 470), height: 54,
+                                                     start: Date(timeIntervalSinceReferenceDate: 800_000_100)))
+        setDrawing(d)
+        guard let seg2 = segment(near: nil) else { return }
+        let line = makeLine(nextLineID("C"), revision: 1, mode: .derivative, seg2)
+        pendingChecks[line.id] = 1
+        let latex = fixed ? "f^{\\prime}\\left( x\\right) =3x^{2}-3" : "f^{\\prime}\\left( x\\right) =3x^{2}-3x"
+        finishCheck(seg2, line: line, result: RecognitionResult(lineID: line.id, revision: 1, latex: latex, engine: "MyScript", ms: 131))
+        if !fixed, let c = checks.first { revealHint(c, at: 0) }
+    }
+
     private func loadSolveDemo() {
         clear()
         let left: CGFloat = 120
@@ -1628,22 +1709,6 @@ extension AppModel {
         finishFunction(seg, result: RecognitionResult(lineID: lineID, revision: 1, latex: latex, engine: "MyScript", ms: 146),
                        target: nil, lineID: lineID, revision: 1, ink: seg.strokeIDs.compactMap { pkByID[$0] })
         return functions.last
-    }
-
-    private func loadCheckDemo() {
-        clear()
-        demoFunction("f(x)=x^3-3x", latex: "f\\left( x\\right) =x^{3}-3x", y: 200, start: 800_000_000)
-        // 学生自己写的这一步留在纸上
-        var d = drawing
-        d.strokes.append(contentsOf: DemoInk.strokes("f'(x)=3x^2-3x", at: CGPoint(x: 120, y: 420), height: 54,
-                                                     start: Date(timeIntervalSinceReferenceDate: 800_000_100)))
-        setDrawing(d)
-        guard let seg = segment(near: nil) else { return }
-        let line = makeLine(nextLineID("C"), revision: 1, mode: .derivative, seg)
-        finishCheck(seg, line: line, result: RecognitionResult(lineID: line.id, revision: 1, latex: "f^{\\prime}\\left( x\\right) =3x^{2}-3x",
-                                                               engine: "MyScript", ms: 131))
-        if let c = checks.first { revealHint(c, at: 0) }
-        functions.first?.card.minimized = true
     }
 
     private func loadTransformDemo() {
@@ -1699,7 +1764,8 @@ extension AppModel {
             GeometrySnapshot(geometry: g.geometry, points: g.scene.freePoints, card: CardSnapshot(g.card),
                              ink: PKDrawing(strokes: g.ink).dataRepresentation())
         }
-        return BoardSnapshot(functions: fs, shapes: ss, geometries: gs, lineNumbers: lineNumbers, scrollY: scrollOffset.y)
+        return BoardSnapshot(functions: fs, shapes: ss, geometries: gs, lineNumbers: lineNumbers, scrollY: scrollOffset.y,
+                             scrollX: scrollOffset.x, zoom: zoom)
     }
 
     /// 纸上的笔迹（PKDrawing 数据）。
@@ -1767,7 +1833,9 @@ extension AppModel {
         functions = []
         shapes = []
         geometries = []
+        // 检查的圈不存盘：重新打开后要看就再双击检查一次
         checks = []
+        pendingChecks = [:]
         lineNumbers = snap?.lineNumbers ?? [:]
         setDrawing(d)
         guard let snap else { return }

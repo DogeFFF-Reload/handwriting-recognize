@@ -4,58 +4,75 @@ import CoreGraphics
 import Foundation
 import MathEngine
 
-/// 「检查我这一步」：学生自己写的 f'(x) = …，和纸上写过的 f(x) = … 对一下。
-/// 只圈出有问题的那一项，不直接给答案；提示分三级（一句反问 → 相关的规则 → 这一项该是什么），学生自己点开。
-/// 判对错用 P4 的 MathEngine（逐项比对），提示按错误码套模板，不调模型、没有延迟。首版只覆盖多项式的一阶导数。
+/// 「检查我这一步」：学生自己写的 f'(x) = …（或 f'(2) = …、f''(x) = …），和纸上写过的 f(x) = … 对一下。
+/// 只圈出有问题的地方，不直接给答案；提示分三级（一句反问 → 相关的规则 → 该是什么），学生自己点开。
+/// 多项式的一阶导数用 P4 的 MathEngine 逐项比对，圈得到具体那一项；不是多项式（sin x、e^x……）、在一点取值、
+/// 高阶导数，或者这一行逐项读不出来，就在一串点上比数值（P4 的 DerivativeComparison），只判整行。
+/// 提示按错误码、按原函数用到的求导法则套模板，不调模型、没有延迟。
 public enum StepReview {
     /// 一处问题。
     public struct Issue: Equatable {
-        /// MathEngine 的错误码：wrong_term、wrong_coefficient、wrong_sign、missing_term、extra_term、not_derivative。
+        /// MathEngine 的错误码：wrong_term、wrong_coefficient、wrong_sign、missing_term、extra_term、not_derivative；
+        /// 整行判的是 whole_line。
         public var kind: String
-        /// 学生写的那一项（普通文字，如「−3x」）；漏项时为空。
+        /// 学生写的那一项（普通文字，如「−3x」）；漏项、整行时为空。
         public var written: String
-        /// 圈在哪里（画布坐标）。漏项时是这一行末尾的一小块。
+        /// 圈在哪里（画布坐标）。漏项时是这一行末尾的一小块，整行时是等号右边。
         public var box: CGRect
-        /// 三级提示：一句反问、相关的规则、这一项该是什么。
+        /// 三级提示：一句反问、相关的规则、该是什么。
         public var hints: [String]
+        /// 最后一级里要排成式子的正确结果（整行判时：f'(x) = \sin x + x\cos x）；逐项判时为 nil，答案写在提示里。
+        public var answerLatex: String?
     }
 
     public struct Result: Equatable {
         /// 这一步全对。
         public var ok: Bool
         public var issues: [Issue]
-        /// 正确的导数（LaTeX，不带左边）。
+        /// 正确的结果（LaTeX，带左边）：f'(x)=3x^{2} - 3、f'(2)=9。
         public var answer: String
+        /// 逐项比对的（多项式），不是整行比数值的。
+        public var byTerm: Bool
     }
 
     public enum Problem: Error, Equatable {
         /// 不是「f'(x) = …」，或者等号后面还没写。
         case notADerivative
-        /// 写的是 f''(x)：首版只检查一阶导数。
-        case higherOrder
-        /// 原函数不是多项式（三角、指数、带参数……）。
-        case unsupportedFunction
-        /// 这一行读不出来。
+        /// 等号后面读不出来（有看不懂的字、多了别的字母）。
         case unreadable
     }
 
-    /// `line`：这一行的笔画（圈错项用）；`functionLatex`：上面那条 f(x) = …；`stepLatex`：识别出的这一行。
-    public static func review(line: InkLine, functionLatex: String, stepLatex: String) throws -> Result {
-        guard let request = DerivativeRequest.parse(stepLatex) else { throw Problem.notADerivative }
-        guard request.order == 1 else { throw Problem.higherOrder }
-        guard let rhs = Solver.splitEquals(stepLatex).rhs, !rhs.isEmpty else { throw Problem.notADerivative }
-        let f: Poly
-        let defects: [Defect]
-        do {
-            f = try MathEngine.DerivativeCheck.residual(functionLatex)
-            defects = try MathEngine.DerivativeCheck.run(functionLatex: functionLatex, lineLatex: stepLatex)
-        } catch {
-            throw Problem.unsupportedFunction
+    /// `line`：这一行的笔画（圈错项用）；`function`：上面那条 f(x) = …（参数取滑条上现在的值）；`stepLatex`：识别出的这一行。
+    public static func review(line: InkLine, function d: FunctionDefinition, stepLatex: String) throws -> Result {
+        guard let request = DerivativeRequest.parse(stepLatex), let rhs = DerivativeComparison.rightHandSide(stepLatex) else {
+            throw Problem.notADerivative
         }
-        let answer = LatexRender.poly(f.derivative())
-        if defects.contains(where: { $0.kind == .parseError }) { throw Problem.unreadable }
-        guard !defects.isEmpty else { return Result(ok: true, issues: [], answer: answer) }
+        var expected = d.body
+        for _ in 0..<request.order { expected = expected.derivative(d.variable) }
+        let lhs = request.lhsLatex(variable: d.variable)
+        // 多项式的一阶导数：逐项比对，圈到具体那一项（逐项读不出来就往下走，整行比）
+        if request.order == 1, request.point == nil, d.variable == "x", let poly = d.polynomial,
+           let r = byTerm(line: line, functionLatex: MathEngineGrading.polynomialLatex(poly), stepLatex: stepLatex,
+                          answer: lhs + "=" + expected.latex) {
+            return r
+        }
+        if let p = request.point { expected = expected.substituting(d.variable, with: .number(p)) }
+        guard let same = DerivativeComparison.matches(student: rhs, expected: expected, variable: d.variable) else {
+            throw Problem.unreadable
+        }
+        let answer = lhs + "=" + (request.point == nil ? expected.latex : MathExpr.formatNumber(expected.evaluate([:])))
+        guard !same else { return Result(ok: true, issues: [], answer: answer, byTerm: false) }
+        let issue = Issue(kind: "whole_line", written: "", box: rightSide(of: line),
+                          hints: wholeLineHints(request, function: d, lhs: lhs), answerLatex: answer)
+        return Result(ok: false, issues: [issue], answer: answer, byTerm: false)
+    }
 
+    /// 逐项比对（MathEngine）。这一行逐项读不出来时返回 nil：交给整行比数值。
+    static func byTerm(line: InkLine, functionLatex: String, stepLatex: String, answer: String) -> Result? {
+        guard let f = try? MathEngine.DerivativeCheck.residual(functionLatex),
+              let defects = try? MathEngine.DerivativeCheck.run(functionLatex: functionLatex, lineLatex: stepLatex),
+              !defects.contains(where: { $0.kind == .parseError }) else { return nil }
+        guard !defects.isEmpty else { return Result(ok: true, issues: [], answer: answer, byTerm: true) }
         let student = try? StudentLine.parse(stepLatex)
         let boxes = TermSegmenter.termBoxes(strokes: line.strokes, expectedCount: student?.terms.count)
         let issues = defects.map { d -> Issue in
@@ -63,10 +80,85 @@ public enum StepReview {
             let written = term.map { PlainRender.term($0.coef, $0.pow) } ?? ""
             return Issue(kind: d.kind.rawValue, written: written,
                          box: box(for: d, line: line, student: student, termBoxes: boxes),
-                         hints: hints(for: d, function: f, written: written))
+                         hints: hints(for: d, function: f, written: written), answerLatex: nil)
         }
-        return Result(ok: false, issues: issues, answer: answer)
+        return Result(ok: false, issues: issues, answer: answer, byTerm: true)
     }
+
+    /// 整行判错时圈等号右边（切不出等号就圈整行）。
+    static func rightSide(of line: InkLine) -> CGRect {
+        guard let boxes = TermSegmenter.termBoxes(strokes: line.strokes), let first = boxes.first else {
+            return line.band.insetBy(dx: -8, dy: -8)
+        }
+        return boxes.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -8, dy: -8)
+    }
+
+    /// 整行判错的三级提示：先问一句，再提醒原函数用得上的求导法则，最后是正确结果（排成式子，见 answerLatex）。
+    static func wholeLineHints(_ request: DerivativeRequest, function d: FunctionDefinition, lhs: String) -> [String] {
+        let name = Explanation.pretty(lhs).replacingOccurrences(of: "'", with: "′")
+        let first: String
+        if let p = request.point {
+            first = "\(name) 是导函数在 x = \(Numerics.plain(p)) 处的值：导函数先求对了吗？"
+        } else if request.order > 1 {
+            first = "\(name) 要连着求 \(request.order) 次导：每一次都求对了吗？"
+        } else {
+            first = "这一行和真正的导数对不上：每一项、每个因子都求导了吗？"
+        }
+        var rules = Array(rules(for: d.body, variable: d.variable).prefix(3))
+        if request.point != nil { rules.insert("先求出导函数，再把 x 的值代进去", at: 0) }
+        let second = rules.isEmpty ? "逐项求导：常数的导数是 0，xⁿ 的导数是 n·xⁿ⁻¹。" : rules.joined(separator: "；") + "。"
+        return [first, second, "正确的是："]
+    }
+
+    /// 原函数里用得上的求导法则（从外往里）：乘积、商、链式法则，和 sin、eˣ、ln 这些基本导数。
+    static func rules(for e: MathExpr, variable v: String) -> [String] {
+        var out: [String] = []
+        func add(_ s: String) { if !out.contains(s) { out.append(s) } }
+        let chain = "链式法则：外层求导，再乘里层的导数"
+        func walk(_ e: MathExpr) {
+            switch e {
+            case .multiply(let a, let b):
+                if a.depends(on: v), b.depends(on: v) { add("乘积：(uv)′ = u′v + uv′") }
+                walk(a)
+                walk(b)
+            case .divide(let a, let b):
+                if b.depends(on: v) { add("商：(u/v)′ = (u′v − uv′)/v²") }
+                walk(a)
+                walk(b)
+            case .power(let a, let b):
+                if b.depends(on: v) {
+                    add(a == MathExpr.e ? "(eᵘ)′ = eᵘ·u′" : "(aᵘ)′ = aᵘ·ln a·u′")
+                } else if a.depends(on: v) {
+                    add("(xⁿ)′ = n·xⁿ⁻¹")
+                    if a != .symbol(v) { add(chain) }
+                }
+                walk(a)
+                walk(b)
+            case .call(let name, let args):
+                if let u = args.last, u.depends(on: v) {
+                    if let r = basics[name] { add(r) }
+                    if u != .symbol(v) { add(chain) }
+                }
+                args.forEach(walk)
+            case .negate(let a):
+                walk(a)
+            case .add(let a, let b), .subtract(let a, let b):
+                walk(a)
+                walk(b)
+            default:
+                break
+            }
+        }
+        walk(e)
+        return out
+    }
+
+    static let basics: [String: String] = [
+        "sin": "(sin x)′ = cos x", "cos": "(cos x)′ = −sin x", "tan": "(tan x)′ = 1/cos²x",
+        "ln": "(ln x)′ = 1/x", "lg": "(lg x)′ = 1/(x ln 10)", "log": "(logₐx)′ = 1/(x ln a)", "exp": "(eˣ)′ = eˣ",
+        "sqrt": "(√x)′ = 1/(2√x)", "arcsin": "(arcsin x)′ = 1/√(1 − x²)", "arccos": "(arccos x)′ = −1/√(1 − x²)",
+        "arctan": "(arctan x)′ = 1/(1 + x²)",
+    ]
 
     // MARK: 圈哪里
 

@@ -6,7 +6,8 @@ import SwiftUI
 
 /// 双击笔身后在笔尖旁选的处理。
 /// 「求解」把求导、积分、极限、求和、解方程合在一起：写的是什么就算什么（f'(x)、\int_0^2 f(x)dx、\lim…、\sum…、x^2-4=0）。
-/// 「检查」只看学生自己写的这一步对不对（首版是多项式求导 f'(x) = …）：笔迹留着，有问题的地方画圈，提示自己点开。
+/// 「检查」不替学生算，只看学生自己写的这一步（f'(x) = …、f'(2) = …）对不对：笔迹留着，有问题的地方画圈，
+/// 提示学生自己一级一级点开。改对了打勾，原函数的图像里这时才画出导函数。
 /// 「矩阵」只在识别结果里真有矩阵时出现，点开是计算 / 求逆 / 求行列式 / 看变换。
 enum SegmentKind: String, CaseIterable, Identifiable {
     case function, solve, check, geometry, matrix
@@ -27,7 +28,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
         switch self {
         case .function: return "收成标准式子并作图"
         case .solve: return "求导、积分、极限、求和、解方程，直接算出结果"
-        case .check: return "看这一步对不对：先圈出有问题的地方，提示自己点开"
+        case .check: return "检查自己写的导数：先圈出有问题的地方，提示自己点开"
         case .geometry: return "收成动态几何"
         case .matrix: return "计算、求逆矩阵、求行列式、看变换"
         }
@@ -206,8 +207,9 @@ final class FunctionItem: Identifiable {
     }
 }
 
-/// 「检查」过的一行。学生的笔迹留在纸上：有问题的地方画红圈，提示一级一级自己点开（反问 → 规则 → 答案）；
-/// 全对时行尾一个绿勾。圈出来以后这一行又改过（擦了、在旁边写了），圈就变淡，等学生改完再检查一次。不存盘。
+/// 「检查」过的一行。学生的笔迹留在纸上：有问题的地方画红圈，提示一级一级自己点开（想一想 → 规则 → 答案）；
+/// 全对时行尾一个绿勾，原函数的图像里这时才画出导函数。圈出来以后这一行又改过（擦了、在旁边写了），
+/// 或者原函数改了，圈就变淡，等学生改完再检查一次。不存盘。
 @Observable
 final class CheckItem: Identifiable {
     let id = UUID()
@@ -218,24 +220,26 @@ final class CheckItem: Identifiable {
     var strokeIDs: Set<String>
     var bounds: CGRect
     var result: StepReview.Result
-    /// 对照的是哪条函数。
+    /// 对照的是哪条函数：它改了、删了，这一行的检查就作废。
+    var parentID: UUID
     var functionName: String
     /// 每一处问题打开到了第几级提示（0：只圈出来）。
     var levels: [Int]
     /// 正在看提示的是第几处（nil：提示收着）。
     var focus: Int?
-    /// 圈出来以后这一行又改过了。
+    /// 圈出来以后这一行又改过了（或者原函数改了）。
     var stale = false
     /// 认出来的这一行（对了以后「收成式子」用）。
     var recognized: RecognitionResult
 
     init(lineID: String, revision: Int, strokeIDs: Set<String>, bounds: CGRect, result: StepReview.Result,
-         functionName: String, recognized: RecognitionResult) {
+         parentID: UUID, functionName: String, recognized: RecognitionResult) {
         self.lineID = lineID
         self.revision = revision
         self.strokeIDs = strokeIDs
         self.bounds = bounds
         self.result = result
+        self.parentID = parentID
         self.functionName = functionName
         self.levels = Array(repeating: 0, count: result.issues.count)
         self.recognized = recognized

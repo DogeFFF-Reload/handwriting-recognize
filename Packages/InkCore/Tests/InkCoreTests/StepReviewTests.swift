@@ -22,10 +22,19 @@ final class StepReviewTests: XCTestCase {
 
     private func review(_ f: String, _ step: String, file: StaticString = #filePath, line: UInt = #line) -> StepReview.Result? {
         do {
-            return try StepReview.review(line: goldenLine, functionLatex: f, stepLatex: step)
+            return try StepReview.review(line: goldenLine, function: FunctionDefinition.parse(f), stepLatex: step)
         } catch {
             XCTFail("\(step)：\(error)", file: file, line: line)
             return nil
+        }
+    }
+
+    private func problem(_ f: String, _ step: String) -> StepReview.Problem? {
+        do {
+            _ = try StepReview.review(line: goldenLine, function: FunctionDefinition.parse(f), stepLatex: step)
+            return nil
+        } catch {
+            return error as? StepReview.Problem
         }
     }
 
@@ -43,7 +52,9 @@ final class StepReviewTests: XCTestCase {
         // 圈的是笔画切出来的第二项（−3x，从 x = 196 到 270），外扩一点
         XCTAssertEqual(issue.box.minX, 188)
         XCTAssertEqual(issue.box.maxX, 278)
-        XCTAssertEqual(r.answer, "3x^{2}-3")
+        XCTAssertNil(issue.answerLatex, "逐项判时答案写在第三级提示里")
+        XCTAssertTrue(r.byTerm)
+        XCTAssertEqual(r.answer, "f'(x)=3x^{2} - 3")
     }
 
     func testCorrectStepIsConfirmed() throws {
@@ -87,20 +98,66 @@ final class StepReviewTests: XCTestCase {
     }
 
     func testProblems() {
-        XCTAssertThrowsError(try StepReview.review(line: goldenLine, functionLatex: "f(x)=x^2", stepLatex: "f(x)=x^2")) {
-            XCTAssertEqual($0 as? StepReview.Problem, .notADerivative)
-        }
-        XCTAssertThrowsError(try StepReview.review(line: goldenLine, functionLatex: "f(x)=x^2", stepLatex: "f'(x)=")) {
-            XCTAssertEqual($0 as? StepReview.Problem, .notADerivative)
-        }
-        XCTAssertThrowsError(try StepReview.review(line: goldenLine, functionLatex: "f(x)=x^3", stepLatex: "f''(x)=6x")) {
-            XCTAssertEqual($0 as? StepReview.Problem, .higherOrder)
-        }
-        XCTAssertThrowsError(try StepReview.review(line: goldenLine, functionLatex: "f(x)=\\sin x", stepLatex: "f'(x)=\\cos x")) {
-            XCTAssertEqual($0 as? StepReview.Problem, .unsupportedFunction)
-        }
-        XCTAssertThrowsError(try StepReview.review(line: goldenLine, functionLatex: "f(x)=x^2", stepLatex: "f'(x)=2x+?")) {
-            XCTAssertEqual($0 as? StepReview.Problem, .unreadable)
-        }
+        XCTAssertEqual(problem("f(x)=x^2", "f(x)=x^2"), .notADerivative)
+        XCTAssertEqual(problem("f(x)=x^2", "f'(x)="), .notADerivative)
+        XCTAssertEqual(problem("f(x)=x^2", "f'(x)=2x+?"), .unreadable)
+        XCTAssertEqual(problem("f(x)=\\sin x", "f'(x)=\\cos x+a"), .unreadable, "多了别的字母：不下结论")
+    }
+
+    // MARK: 整行比数值（P4 的 DerivativeComparison）
+
+    func testNonPolynomialIsJudgedAsAWholeLine() throws {
+        let ok = try XCTUnwrap(review("f(x)=x\\sin x", "f'(x)=\\sin x+x\\cos x"))
+        XCTAssertTrue(ok.ok)
+        XCTAssertFalse(ok.byTerm)
+
+        let wrong = try XCTUnwrap(review("f(x)=x\\sin x", "f'(x)=x\\cos x"))
+        XCTAssertFalse(wrong.ok)
+        XCTAssertEqual(wrong.issues.map(\.kind), ["whole_line"])
+        let hints = wrong.issues[0].hints
+        XCTAssertEqual(hints.count, 3)
+        XCTAssertFalse(hints[0].contains("cos"), "第一级不说答案")
+        XCTAssertTrue(hints[1].contains("乘积"), hints[1])
+        XCTAssertTrue(hints[1].contains("(sin x)′ = cos x"), hints[1])
+        let answer = try XCTUnwrap(wrong.issues[0].answerLatex)
+        XCTAssertTrue(answer.hasPrefix("f'(x)="), answer)
+        XCTAssertTrue(answer.contains("\\cos"), answer)
+        // 圈的是等号右边（x = 125 起），不是整行
+        XCTAssertEqual(wrong.issues[0].box.minX, 117)
+
+        let chain = try XCTUnwrap(review("f(x)=e^{2x}", "f'(x)=e^{2x}"))
+        XCTAssertFalse(chain.ok)
+        XCTAssertTrue(chain.issues[0].hints[1].contains("eᵘ"), chain.issues[0].hints[1])
+        XCTAssertTrue(try XCTUnwrap(review("f(x)=e^{2x}", "f'(x)=2e^{2x}")).ok)
+        XCTAssertTrue(try XCTUnwrap(review("f(x)=\\sin(x^2)", "f'(x)=2x\\cos(x^2)")).ok)
+        let inner = try XCTUnwrap(review("f(x)=\\sin(x^2)", "f'(x)=\\cos(x^2)"))
+        XCTAssertTrue(inner.issues[0].hints[1].contains("链式法则"), inner.issues[0].hints[1])
+    }
+
+    func testDerivativeAtAPointAndHigherOrder() throws {
+        let at = try XCTUnwrap(review("f(x)=x^3-3x", "f'(2)=9"))
+        XCTAssertTrue(at.ok)
+        XCTAssertEqual(at.answer, "f'(2)=9")
+        let wrongAt = try XCTUnwrap(review("f(x)=x^3-3x", "f'(2)=6"))
+        XCTAssertFalse(wrongAt.ok)
+        XCTAssertTrue(wrongAt.issues[0].hints[0].contains("x = 2"), wrongAt.issues[0].hints[0])
+        XCTAssertTrue(wrongAt.issues[0].hints[1].hasPrefix("先求出导函数"), wrongAt.issues[0].hints[1])
+        XCTAssertEqual(wrongAt.issues[0].answerLatex, "f'(2)=9")
+
+        XCTAssertTrue(try XCTUnwrap(review("f(x)=x^3-3x", "f''(x)=6x")).ok)
+        let second = try XCTUnwrap(review("f(x)=x^3-3x", "f''(x)=3x^2-3"))
+        XCTAssertFalse(second.ok)
+        XCTAssertTrue(second.issues[0].hints[0].contains("2 次导"), second.issues[0].hints[0])
+    }
+
+    func testSliderDecimalsAndLinesMathEngineCannotRead() throws {
+        // 拖过滑条：系数是小数，照样逐项比
+        let decimal = try XCTUnwrap(review("f(x)=1.5x^3-2x", "f'(x)=4.5x^2-2"))
+        XCTAssertTrue(decimal.ok)
+        XCTAssertTrue(decimal.byTerm)
+        // 写法 MathEngine 逐项读不出来（\cos 0）：退回整行比数值，不算看不懂
+        let odd = try XCTUnwrap(review("f(x)=x^3-3x", "f'(x)=3x^2-3\\cos 0"))
+        XCTAssertTrue(odd.ok)
+        XCTAssertFalse(odd.byTerm)
     }
 }
