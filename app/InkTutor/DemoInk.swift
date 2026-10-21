@@ -83,7 +83,7 @@ enum DemoInk {
 
     /// 两点之间的直线（几何演示用）。
     static func segment(_ a: CGPoint, _ b: CGPoint, n: Int = 28) -> [CGPoint] {
-        (0...n).map { i in
+        (0...n).map { (i: Int) -> CGPoint in
             let t = CGFloat(i) / CGFloat(n)
             return CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
         }
@@ -91,7 +91,7 @@ enum DemoInk {
 
     /// 椭圆弧（几何演示用）。
     static func arc(_ c: CGPoint, _ a: CGFloat, _ b: CGFloat, from t0: CGFloat = 0, to t1: CGFloat = 2 * .pi, n: Int = 96) -> [CGPoint] {
-        (0...n).map { i in
+        (0...n).map { (i: Int) -> CGPoint in
             let t = t0 + (t1 - t0) * CGFloat(i) / CGFloat(n)
             return CGPoint(x: c.x + a * cos(t), y: c.y + b * sin(t))
         }

@@ -405,7 +405,7 @@ public enum ShapeRecognizer {
             switch p.kind {
             case .curve:
                 guard let e = p.ellipse else { continue }
-                let pts = (0..<72).map { e.point(at: CGFloat($0) / 72 * 2 * .pi) }
+                let pts = e.samples(72)
                 let b = Geo.bounds(pts)
                 guard b.height < 0.8 * b.width else { continue }
                 out.append(Cap(index: i, center: e.center, width: b.width, height: b.height,
@@ -578,7 +578,12 @@ public enum ShapeRecognizer {
         let V = g.nodes.count, E = g.edges.count
         guard V >= 4 else { return nil }
         let center = Geo.mean(g.nodes)
-        let mean = { (ks: [Int]) -> Double in ks.isEmpty ? 0 : Double(ks.map { g.length(g.edges[$0]) }.reduce(0, +)) / Double(ks.count) }
+        func mean(_ ks: [Int]) -> Double {
+            guard !ks.isEmpty else { return 0 }
+            var total: CGFloat = 0
+            for k in ks { total += g.length(g.edges[k]) }
+            return Double(total) / Double(ks.count)
+        }
 
         // 长方体 / 正方体：8 个顶点（不画看不见的棱时 7 个），棱分三组平行
         if (V == 8 && (9...12).contains(E)) || (V == 7 && E == 9) {
@@ -594,9 +599,13 @@ public enum ShapeRecognizer {
                 let w = mean(horizontal), h = mean(vertical), d = mean(depth)
                 let solid: Solid3
                 if abs(w - h) < 0.2 * max(w, h) {
-                    solid = Solid3(kind: .cube, center: center, dims: [(w + h) / 2 * 1.05])
+                    let edge: Double = (w + h) / 2 * 1.05
+                    solid = Solid3(kind: .cube, center: center, dims: [edge])
                 } else {
-                    solid = Solid3(kind: .cuboid, center: center, dims: [w * 1.05, h * 1.05, min(max(d * 1.6, 0.4 * min(w, h)), 2.5 * min(w, h))])
+                    // 斜着画的棱（深度）一般画短了：放大一些，限制在前面那个面短边的 0.4～2.5 倍
+                    let short: Double = min(w, h)
+                    let depth: Double = min(max(d * 1.6, 0.4 * short), 2.5 * short)
+                    solid = Solid3(kind: .cuboid, center: center, dims: [w * 1.05, h * 1.05, depth])
                 }
                 return (.solid(solid), g.used)
             }
@@ -776,8 +785,8 @@ public enum ShapeRecognizer {
         let k = ((t0 - base) / step).rounded()
         let snapped = base + k * step
         if upright || abs(t0 - snapped) < 0.14 { t0 = snapped }
-        return (0..<n).map { i in
-            let t = t0 + step * CGFloat(i)
+        return (0..<n).map { (i: Int) -> CGPoint in
+            let t: CGFloat = t0 + step * CGFloat(i)
             return CGPoint(x: c.x + r * cos(t), y: c.y + r * sin(t))
         }
     }
@@ -809,13 +818,17 @@ public enum ShapeRecognizer {
             width = (width + height) / 2
             height = width
         }
-        let center = CGPoint(x: c.x + (lo.u + hi.u) / 2 * u.x + (lo.w + hi.w) / 2 * w.x,
-                             y: c.y + (lo.u + hi.u) / 2 * u.y + (lo.w + hi.w) / 2 * w.y)
-        let signs: [(CGFloat, CGFloat)] = [(-1, -1), (1, -1), (1, 1), (-1, 1)]
-        let corners = signs.map { s in
-            CGPoint(x: center.x + s.0 * width / 2 * u.x + s.1 * height / 2 * w.x,
-                    y: center.y + s.0 * width / 2 * u.y + s.1 * height / 2 * w.y)
-        }
+        let midU: CGFloat = (lo.u + hi.u) / 2, midW: CGFloat = (lo.w + hi.w) / 2
+        let center = CGPoint(x: c.x + midU * u.x + midW * w.x, y: c.y + midU * u.y + midW * w.y)
+        // 半宽、半高方向上的两个向量，四个角 = 中心 ± 它们
+        let hu = CGPoint(x: width / 2 * u.x, y: width / 2 * u.y)
+        let hw = CGPoint(x: height / 2 * w.x, y: height / 2 * w.y)
+        let corners: [CGPoint] = [
+            CGPoint(x: center.x - hu.x - hw.x, y: center.y - hu.y - hw.y),
+            CGPoint(x: center.x + hu.x - hw.x, y: center.y + hu.y - hw.y),
+            CGPoint(x: center.x + hu.x + hw.x, y: center.y + hu.y + hw.y),
+            CGPoint(x: center.x - hu.x + hw.x, y: center.y - hu.y + hw.y),
+        ]
         return Polygon2(vertices: corners, rule: square ? .square : .rectangle)
     }
 

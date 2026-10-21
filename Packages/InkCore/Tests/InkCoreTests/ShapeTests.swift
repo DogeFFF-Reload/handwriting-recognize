@@ -31,12 +31,22 @@ final class ShapeRecognizerTests: XCTestCase {
     }
 
     private func arc(_ c: CGPoint, _ a: CGFloat, _ b: CGFloat, angle: CGFloat = 0,
-                     from t0: CGFloat = 0, to t1: CGFloat = 2 * .pi, n: Int = 90) -> [CGPoint] {
-        (0...n).map { i in
-            let t = t0 + (t1 - t0) * CGFloat(i) / CGFloat(n)
-            let x = a * cos(t), y = b * sin(t)
-            return CGPoint(x: c.x + x * cos(angle) - y * sin(angle), y: c.y + x * sin(angle) + y * cos(angle))
+                     from t0: CGFloat = 0, to t1: CGFloat = 2 * CGFloat.pi, n: Int = 90) -> [CGPoint] {
+        var out: [CGPoint] = []
+        let ca: CGFloat = cos(angle), sa: CGFloat = sin(angle)
+        for i in 0...n {
+            let t: CGFloat = t0 + (t1 - t0) * CGFloat(i) / CGFloat(n)
+            let x: CGFloat = a * cos(t), y: CGFloat = b * sin(t)
+            let rx: CGFloat = x * ca - y * sa, ry: CGFloat = x * sa + y * ca
+            out.append(CGPoint(x: c.x + rx, y: c.y + ry))
         }
+        return out
+    }
+
+    /// 以 c 为中心、半径 r、角度 t（弧度）的点。
+    private func polar(_ c: CGPoint, _ r: CGFloat, _ t: CGFloat) -> CGPoint {
+        let dx: CGFloat = r * cos(t), dy: CGFloat = r * sin(t)
+        return CGPoint(x: c.x + dx, y: c.y + dy)
     }
 
     private var clock = 0.0
@@ -84,7 +94,9 @@ final class ShapeRecognizerTests: XCTestCase {
     func testSquareInOneStroke() throws {
         // 稍微歪了 3°、从一个角起笔
         let c = CGPoint(x: 300, y: 300)
-        let vs = [(-1, -1), (1, -1), (1, 1), (-1, 1)].map { Geo.rotate(CGPoint(x: c.x + CGFloat($0.0) * 70, y: c.y + CGFloat($0.1) * 70), about: c, by: 0.05) }
+        let corners = [CGPoint(x: c.x - 70, y: c.y - 70), CGPoint(x: c.x + 70, y: c.y - 70),
+                       CGPoint(x: c.x + 70, y: c.y + 70), CGPoint(x: c.x - 70, y: c.y + 70)]
+        let vs = corners.map { Geo.rotate($0, about: c, by: 0.05) }
         guard case .polygon(let p)? = only([s(path(vs))]) else { return XCTFail() }
         XCTAssertEqual(p.rule, .square)
         XCTAssertEqual(Figure.polygon(p).name, "正方形")
@@ -110,7 +122,10 @@ final class ShapeRecognizerTests: XCTestCase {
 
     func testEquilateralTriangle() throws {
         let c = CGPoint(x: 300, y: 300)
-        let vs = [-90.0, 30, 150].map { d in CGPoint(x: c.x + 100 * CGFloat(cos(d * .pi / 180)) + 4, y: c.y + 100 * CGFloat(sin(d * .pi / 180))) }
+        let degrees: [CGFloat] = [-90, 30, 150]
+        // 稍微歪一点：一个顶点往右偏 4
+        var vs = degrees.map { polar(c, 100, $0 * CGFloat.pi / 180) }
+        vs[0].x += 4
         guard case .polygon(let p)? = only([s(path(vs))]) else { return XCTFail() }
         XCTAssertEqual(p.rule, .regular)
         XCTAssertEqual(Figure.polygon(p).name, "等边三角形")
@@ -127,7 +142,7 @@ final class ShapeRecognizerTests: XCTestCase {
 
     func testRegularHexagon() throws {
         let c = CGPoint(x: 300, y: 300)
-        let vs = (0..<6).map { k in CGPoint(x: c.x + 90 * cos(CGFloat(k) * .pi / 3), y: c.y + 90 * sin(CGFloat(k) * .pi / 3)) }
+        let vs = (0..<6).map { (k: Int) -> CGPoint in polar(c, 90, CGFloat(k) * CGFloat.pi / 3) }
         guard case .polygon(let p)? = only([s(path(vs))]) else { return XCTFail() }
         XCTAssertEqual(p.rule, .regular)
         XCTAssertEqual(Figure.polygon(p).name, "正六边形")
@@ -146,7 +161,12 @@ final class ShapeRecognizerTests: XCTestCase {
         guard case .segment(let a, let b)? = only([s(line(CGPoint(x: 100, y: 100), CGPoint(x: 400, y: 160)))]) else { return XCTFail() }
         XCTAssertEqual(Geo.dist(a, b), 306, accuracy: 6)
         // 乱涂的曲线：认不出
-        let scribble = (0..<120).map { i in CGPoint(x: 100 + CGFloat(i) * 2, y: 200 + 40 * sin(CGFloat(i) * 0.35) * cos(CGFloat(i) * 0.11)) }
+        var scribble: [CGPoint] = []
+        for i in 0..<120 {
+            let k = CGFloat(i)
+            let wave: CGFloat = sin(k * 0.35) * cos(k * 0.11)
+            scribble.append(CGPoint(x: 100 + k * 2, y: 200 + 40 * wave))
+        }
         XCTAssertTrue(recognize([s(scribble)]).isEmpty)
     }
 
@@ -160,6 +180,17 @@ final class ShapeRecognizerTests: XCTestCase {
 
     // MARK: 立体图形
 
+    /// 圆柱下底看不见的后半圈：一串短弧。
+    private func dashedBackHalf(_ c: CGPoint) -> [InkStroke] {
+        var out: [InkStroke] = []
+        var t: CGFloat = CGFloat.pi + 0.1
+        while t < 2 * CGFloat.pi {
+            out.append(s(arc(c, 100, 30, from: t, to: t + 0.22, n: 6), amp: 0.6))
+            t += 0.42
+        }
+        return out
+    }
+
     func testCylinder() throws {
         let top = CGPoint(x: 300, y: 150), bottom = CGPoint(x: 300, y: 400)
         let strokes = [
@@ -168,7 +199,7 @@ final class ShapeRecognizerTests: XCTestCase {
             s(line(CGPoint(x: 400, y: 150), CGPoint(x: 399, y: 401))),
             // 下底：前半个椭圆实线，后半个画成虚线
             s(arc(bottom, 100, 30, from: 0, to: .pi)),
-        ] + stride(from: CGFloat.pi + 0.1, to: 2 * .pi, by: 0.42).map { t in s(arc(bottom, 100, 30, from: t, to: t + 0.22, n: 6), amp: 0.6) }
+        ] + dashedBackHalf(bottom)
         guard case .solid(let c)? = only(strokes) else { return XCTFail() }
         XCTAssertEqual(c.kind, .cylinder)
         XCTAssertEqual(c.dims[0], 100, accuracy: 8)
@@ -233,7 +264,7 @@ final class ShapeRecognizerTests: XCTestCase {
                       CGPoint(x: c.x - size, y: c.y + size), CGPoint(x: c.x - size, y: c.y - size), CGPoint(x: c.x, y: c.y - size)]
             XCTAssertEqual(only([s(path(sq, closed: false), amp: amp)])?.name, "正方形", "size \(size)")
             // 圆：多画了一点，收尾越过了起点
-            XCTAssertEqual(only([s(arc(c, size, size * 0.97, from: 0.3, to: 0.3 + 2.25 * .pi), amp: amp)])?.name, "圆", "size \(size)")
+            XCTAssertEqual(only([s(arc(c, size, size * 0.97, from: 0.3, to: 0.3 + 2.25 * CGFloat.pi), amp: amp)])?.name, "圆", "size \(size)")
             let tri = [CGPoint(x: c.x, y: c.y - size), CGPoint(x: c.x - size * 1.1, y: c.y + size * 0.7), CGPoint(x: c.x + size * 0.9, y: c.y + size * 0.8)]
             XCTAssertTrue(only([s(path(tri), amp: amp)])?.name.hasSuffix("三角形") ?? false, "size \(size)")
         }
@@ -291,7 +322,8 @@ final class ShapeRecognizerTests: XCTestCase {
 
     func testRegularPolygonVertexRotatesAndScales() throws {
         let c = CGPoint(x: 300, y: 300)
-        let hex = Figure.polygon(Polygon2(vertices: (0..<6).map { CGPoint(x: c.x + 100 * cos(CGFloat($0) * .pi / 3), y: c.y + 100 * sin(CGFloat($0) * .pi / 3)) }, rule: .regular))
+        let corners = (0..<6).map { (k: Int) -> CGPoint in polar(c, 100, CGFloat(k) * CGFloat.pi / 3) }
+        let hex = Figure.polygon(Polygon2(vertices: corners, rule: .regular))
         guard case .polygon(let p) = hex.dragging(.vertex(0), to: CGPoint(x: 300, y: 450)) else { return XCTFail() }
         for v in p.vertices { XCTAssertEqual(Geo.dist(v, c), 150, accuracy: 0.01) }
         XCTAssertEqual(Figure.polygon(p).name, "正六边形")

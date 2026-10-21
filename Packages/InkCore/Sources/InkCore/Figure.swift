@@ -104,7 +104,17 @@ public struct Ellipse2: Equatable {
     var v: CGPoint { CGPoint(x: -sin(angle), y: cos(angle)) }
 
     public func point(at t: CGFloat) -> CGPoint {
-        CGPoint(x: center.x + a * cos(t) * u.x + b * sin(t) * v.x, y: center.y + a * cos(t) * u.y + b * sin(t) * v.y)
+        let ca: CGFloat = a * cos(t), sb: CGFloat = b * sin(t)
+        let du = u, dv = v
+        return CGPoint(x: center.x + ca * du.x + sb * dv.x, y: center.y + ca * du.y + sb * dv.y)
+    }
+
+    /// 一圈上等分的 n 个点（画轮廓、算范围用）。
+    public func samples(_ n: Int) -> [CGPoint] {
+        let step: CGFloat = 2 * CGFloat.pi / CGFloat(n)
+        var out: [CGPoint] = []
+        for i in 0..<n { out.append(point(at: step * CGFloat(i))) }
+        return out
     }
 
     /// 两个焦点（长轴上）。圆的焦点就是圆心。
@@ -276,7 +286,7 @@ extension Figure {
         switch self {
         case .segment(let a, let b): return Geo.bounds([a, b])
         case .polygon(let p): return Geo.bounds(p.vertices)
-        case .ellipse(let e): return Geo.bounds((0..<48).map { e.point(at: CGFloat($0) / 48 * 2 * .pi) })
+        case .ellipse(let e): return Geo.bounds(e.samples(48))
         case .solid(let s): return Geo.bounds(s.projection().outline)
         }
     }
@@ -563,6 +573,8 @@ struct Mesh {
 
 extension Solid3 {
     static let roundSegments = 48
+    /// 正三角形底面三个顶点的角度：A 左前、B 右前、C 在后面（7π/6、11π/6、π/2）。
+    static let triangleAngles: [Double] = [Double.pi * 7 / 6, Double.pi * 11 / 6, Double.pi / 2]
 
     func mesh() -> Mesh {
         var m = Mesh()
@@ -582,9 +594,9 @@ extension Solid3 {
         case .prism:
             let a = dims[0], h = dims[1]
             let r = a / 3.0.squareRoot()
-            let base = [Double.pi / 2 + 2 * .pi / 3, Double.pi / 2 + 4 * .pi / 3, Double.pi / 2].map { t in (r * cos(t), r * sin(t)) }
-            for (x, z) in base { m.vertices.append(Vec3(x, -h / 2, z)) }
-            for (x, z) in base { m.vertices.append(Vec3(x, h / 2, z)) }
+            for y in [-h / 2, h / 2] {
+                for t in Solid3.triangleAngles { m.vertices.append(Vec3(r * cos(t), y, r * sin(t))) }
+            }
             for f in [[0, 1, 2], [3, 4, 5], [0, 1, 4, 3], [1, 2, 5, 4], [2, 0, 3, 5]] { face(f) }
             m.labels = [(0, "A"), (1, "B"), (2, "C"), (3, "A₁"), (4, "B₁"), (5, "C₁")]
         case .pyramid:
@@ -597,8 +609,8 @@ extension Solid3 {
         case .tetrahedron:
             let a = dims[0]
             let r = a / 3.0.squareRoot(), H = a * (2.0 / 3).squareRoot()
-            let base = [Double.pi / 2 + 2 * .pi / 3, Double.pi / 2 + 4 * .pi / 3, Double.pi / 2].map { t in Vec3(r * cos(t), -H / 4, r * sin(t)) }
-            m.vertices = base + [Vec3(0, 3 * H / 4, 0)]
+            for t in Solid3.triangleAngles { m.vertices.append(Vec3(r * cos(t), -H / 4, r * sin(t))) }
+            m.vertices.append(Vec3(0, 3 * H / 4, 0))
             for f in [[0, 1, 2], [0, 1, 3], [1, 2, 3], [2, 0, 3]] { face(f) }
             m.labels = [(0, "A"), (1, "B"), (2, "C"), (3, "P")]
         case .cylinder, .cone:
@@ -653,9 +665,10 @@ extension Solid3 {
         if kind == .sphere {
             let r = dims[0]
             out.circle = (center, CGFloat(r))
-            out.outline = (0..<48).map { i in
-                let t = Double(i) / 48 * 2 * .pi
-                return CGPoint(x: center.x + CGFloat(r * cos(t)), y: center.y + CGFloat(r * sin(t)))
+            out.outline = (0..<48).map { (i: Int) -> CGPoint in
+                let t: Double = Double(i) / 48 * 2 * Double.pi
+                let dx = CGFloat(r * cos(t)), dy = CGFloat(r * sin(t))
+                return CGPoint(x: center.x + dx, y: center.y + dy)
             }
             // 赤道：前半圈实线、后半圈虚线
             let n = 72
@@ -888,7 +901,7 @@ enum Geo {
 
     /// 每个顶点处的内角（度）。
     static func angles(_ v: [CGPoint]) -> [Double] {
-        v.indices.map { i in
+        v.indices.map { (i: Int) -> Double in
             let p = v[(i - 1 + v.count) % v.count], q = v[i], r = v[(i + 1) % v.count]
             let a = atan2(p.y - q.y, p.x - q.x), b = atan2(r.y - q.y, r.x - q.x)
             var d = abs(Double(a - b)) * 180 / .pi

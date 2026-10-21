@@ -1022,10 +1022,12 @@ extension AppModel {
         let y: CGFloat = 400
         if !solids {
             // 正方形歪了 2°：认出来会摆正
-            let c = CGPoint(x: 250, y: y), tilt: CGFloat = 0.04
-            let sq = [(-1.0, -1.0), (1, -1), (1, 1), (-1, 1), (-1, -1)].map { p -> CGPoint in
-                let dx = CGFloat(p.0) * 95, dy = CGFloat(p.1) * 95
-                return CGPoint(x: c.x + dx * cos(tilt) - dy * sin(tilt), y: c.y + dx * sin(tilt) + dy * cos(tilt))
+            let c = CGPoint(x: 250, y: y)
+            let ct: CGFloat = cos(0.04), st: CGFloat = sin(0.04)
+            let offsets: [CGPoint] = [CGPoint(x: -95, y: -95), CGPoint(x: 95, y: -95), CGPoint(x: 95, y: 95),
+                                      CGPoint(x: -95, y: 95), CGPoint(x: -95, y: -95)]
+            let sq = offsets.map { (o: CGPoint) -> CGPoint in
+                CGPoint(x: c.x + o.x * ct - o.y * st, y: c.y + o.x * st + o.y * ct)
             }
             draw([zip(sq, sq.dropFirst()).flatMap { DemoInk.segment($0.0, $0.1) }])
             draw([DemoInk.arc(CGPoint(x: 640, y: y), 160, 88, from: 0.2, to: 0.2 + 2.05 * .pi)])

@@ -72,8 +72,9 @@ struct ShapeHandles: View {
             // 旋转手柄的柄
             if let r = handles.first(where: { $0.role == .rotate }), case .polygon(let p) = item.figure {
                 let c = p.centroid
-                let d = hypot(r.point.x - c.x, r.point.y - c.y)
-                let stemEnd = CGPoint(x: r.point.x + (c.x - r.point.x) / max(d, 1) * 26, y: r.point.y + (c.y - r.point.y) / max(d, 1) * 26)
+                let d: CGFloat = max(hypot(r.point.x - c.x, r.point.y - c.y), 1)
+                let k: CGFloat = 26 / d
+                let stemEnd = CGPoint(x: r.point.x + (c.x - r.point.x) * k, y: r.point.y + (c.y - r.point.y) * k)
                 Path { path in
                     path.move(to: r.point)
                     path.addLine(to: stemEnd)
@@ -281,7 +282,7 @@ enum ShapeArt {
             p.addLines(poly.vertices)
             p.closeSubpath()
         case .ellipse(let e):
-            p.addLines((0...96).map { e.point(at: CGFloat($0) / 96 * 2 * .pi) })
+            p.addLines(e.samples(96))
             p.closeSubpath()
         case .solid(let s):
             let proj = s.projection()
