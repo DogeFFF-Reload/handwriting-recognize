@@ -521,10 +521,58 @@ struct LatexExpression {
         while let t = peek {
             if t == .op("*") { i += 1; e = .multiply(e, try parseSigned()) }
             else if t == .op("/") { i += 1; e = .divide(e, try parseSigned()) }
+            else if let joined = joinSplitNumber(e) { e = joined }
             else if startsFactor(t) { e = .multiply(e, try parsePower()) }   // 3x、2\sin x、(x+1)(x-1)
             else { break }
         }
         return e
+    }
+
+    /// 识别器把 10 拆成相邻数字（^{1 0}、^{1}{0}）。隐式相乘会得到 0，求和从 1 到 0 就是空和。
+    /// 只拼纯整数，2n、2{x} 仍是乘法。x^23 走的是上标单字符规则，这里碰不到。
+    private mutating func joinSplitNumber(_ e: MathExpr) -> MathExpr? {
+        guard case .number(let n) = e, n.isFinite, n == n.rounded(), abs(n) < 1e12 else { return nil }
+        let sign = n < 0 ? -1.0 : 1.0
+        var digits = String(Int(abs(n).rounded()))
+        let start = i
+        while let more = peekSplitDigits() {
+            digits += more.text
+            i = more.end
+        }
+        guard i != start, let v = Double(digits) else { i = start; return nil }
+        return .number(sign * v)
+    }
+
+    private func peekSplitDigits() -> (text: String, end: Int)? {
+        if case .number(let s)? = peek, isDigitRun(s) { return (s, i + 1) }
+        return bracedDigits(at: i)
+    }
+
+    private func bracedDigits(at start: Int) -> (text: String, end: Int)? {
+        guard case .open? = token(at: start) else { return nil }
+        var k = start + 1
+        var text = ""
+        while k < tokens.count {
+            switch tokens[k] {
+            case .number(let s) where isDigitRun(s):
+                text += s
+                k += 1
+            case .open:
+                guard let inner = bracedDigits(at: k) else { return nil }
+                text += inner.text
+                k = inner.end
+            case .close:
+                guard !text.isEmpty else { return nil }
+                return (text, k + 1)
+            default:
+                return nil
+            }
+        }
+        return nil
+    }
+
+    private func isDigitRun(_ s: String) -> Bool {
+        !s.isEmpty && !s.contains(".") && s.allSatisfy { $0.isNumber }
     }
 
     private mutating func parseSigned() throws -> MathExpr {
@@ -550,14 +598,20 @@ struct LatexExpression {
         return .power(base, exp)
     }
 
+    /// 求和、积分的上下界。不带花括号时把整个数字读完（^10 是 10，不是 1 再乘 0）。
+    /// 花括号里的数字不向外吞，\sum_{k=0}^{10}2^{k} 的 2 仍是通项。
+    private mutating func parseBound() throws -> MathExpr {
+        try parseScript(wholeNumber: true)
+    }
+
     /// ^ 或 _ 后面的部分：{…} 整组；不带括号时按 LaTeX 只取一个字符（x^23 是 x² · 3）。
-    private mutating func parseScript() throws -> MathExpr {
+    private mutating func parseScript(wholeNumber: Bool = false) throws -> MathExpr {
         guard let t = peek else { throw unexpected("结尾") }
         switch t {
         case .open:
             return try parseGroup()
         case .number(let s):
-            if s.count > 1, !s.contains(".") {
+            if !wholeNumber, s.count > 1, !s.contains(".") {
                 tokens[i] = .number(String(s.dropFirst()))
                 return .number(Double(String(s.first!))!)
             }
@@ -810,7 +864,7 @@ struct LatexExpression {
         while peek == .op("_") || peek == .op("^") {
             let isLower = peek == .op("_")
             i += 1
-            let e = try parseScript()
+            let e = try parseBound()
             if isLower { lower = e } else { upper = e }
         }
         guard (lower == nil) == (upper == nil) else { throw unexpected("积分的上下限要写全") }
@@ -845,9 +899,9 @@ struct LatexExpression {
                 guard case .close? = peek else { throw unexpected(peek?.text ?? "缺少 }") }
                 i += 1
             } else if isLower {
-                lower = try parseScript()
+                lower = try parseBound()
             } else {
-                upper = try parseScript()
+                upper = try parseBound()
             }
         }
         guard let lower, let upper else { throw unexpected(product ? "连乘要写上下界" : "求和要写上下界") }
