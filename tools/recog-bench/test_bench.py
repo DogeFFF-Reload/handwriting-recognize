@@ -11,7 +11,8 @@ class InkCoreParityTests(unittest.TestCase):
     def test_reads_the_prompt_from_recognizers_swift(self):
         prompt = load_recognition_prompt()
         self.assertTrue(prompt.startswith("你是手写数学识别器，只负责逐字照抄"))
-        self.assertIn('{"latex": "这行的 LaTeX"}', prompt)
+        self.assertIn('{"latex": "这段的 LaTeX"}', prompt)
+        self.assertIn("\\lim_{x \\to 0}", prompt, "Swift 里的 \\\\ 要还原成一个反斜杠")
         self.assertFalse(prompt.endswith("\n"), "结尾的 \"\"\" 前面那个换行不属于字符串")
 
     def test_swift_multiline_literal_rules(self):
@@ -54,6 +55,10 @@ class NormalizeTests(unittest.TestCase):
 
     def test_normalize_output(self):
         self.assertEqual(normalize("f'(x) = 3x^{2} − 3"), "f'(x)=3x^2-3")
+
+    def test_matrix_row_break_survives(self):
+        self.assertEqual(normalize("\\begin{pmatrix}1 & 2 \\\\ 3 & 4\\end{pmatrix}"),
+                         "\\begin{pmatrix}1&2\\\\3&4\\end{pmatrix}")
 
 
 class ScoringTests(unittest.TestCase):

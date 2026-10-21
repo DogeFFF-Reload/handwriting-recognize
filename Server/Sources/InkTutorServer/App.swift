@@ -65,7 +65,7 @@ func configure(_ app: Application, model: ModelClient? = nil) throws {
                 do {
                     let reply = try await m.chat(model: name, system: nil, prompt: recognitionPrompt, imagePNGBase64: img,
                                                  maxTokens: 200, temperature: 0)
-                    return try extractLatex(fromModelReply: reply)
+                    return canonicalLatex(try extractLatex(fromModelReply: reply))
                 } catch { lastError = error }
             }
             throw lastError
