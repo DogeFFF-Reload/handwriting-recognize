@@ -985,7 +985,13 @@ final class AppModel {
         }
         setDrawing(PKDrawing())
         lineNumbers = [:]
-        // 演示从头来：回放的行号重新从第 1 行数（Server 那边也一起）。
+        resetReplay()
+    }
+
+    /// 演示从头来（清空、打开一份草稿）：回放的行号重新从第 1 行数（Server 那边也一起）。
+    /// 行状态是整个 App 共用一份，每份草稿的行号（F1、D1…）和笔画 id（s1、s2…）却都从头数：
+    /// 不清掉的话，新草稿里的 F1 会被当成上一份的 F1 擦过一轮，回放直接放「改正以后」的那一步。
+    private func resetReplay() {
         Self.replayTracker.reset()
         if let s = URL(string: UserDefaults.standard.string(forKey: "serverURL") ?? ""), s.host != nil {
             var req = URLRequest(url: s.appendingPathComponent("replay/reset"))
@@ -1336,6 +1342,7 @@ extension AppModel {
         shapes = []
         geometries = []
         lineNumbers = snap?.lineNumbers ?? [:]
+        resetReplay()
         setDrawing(d)
         guard let snap else { return }
         func strokes(_ data: Data) -> [PKStroke] { (try? PKDrawing(data: data))?.strokes ?? [] }

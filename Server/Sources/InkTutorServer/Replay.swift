@@ -129,15 +129,13 @@ func recognizeWithReplay(_ replay: RecognizeReplay, upload: UploadRequest, timeo
     }
 }
 
+/// 不用 TaskGroup：TaskGroup 要等所有子任务收尾，而 Vapor client 底下的 EventLoopFuture 不理会取消，
+/// 百炼慢的时候会一直等到它自己的 20 秒超时，回放就放不出来了。
 private func withTimeout(_ seconds: Double, _ live: @escaping @Sendable () async throws -> String) async throws -> String {
-    try await withThrowingTaskGroup(of: String.self) { group in
-        group.addTask { try await live() }
-        group.addTask {
-            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            throw ReplayError.timeout
-        }
-        defer { group.cancelAll() }
-        return try await group.next()!
+    do {
+        return try await withDeadline(seconds: seconds, live)
+    } catch is DeadlineExceeded {
+        throw ReplayError.timeout
     }
 }
 
