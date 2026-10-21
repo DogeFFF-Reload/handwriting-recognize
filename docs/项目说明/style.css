@@ -5,13 +5,13 @@
   margin: 18mm 18mm 18mm 18mm;
   @bottom-center {
     content: counter(page) " / " counter(pages);
-    font-family: "Noto Sans CJK SC", sans-serif;
+    font-family: "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
     font-size: 8.5pt;
     color: #94a3b8;
   }
   @bottom-left {
     content: "笔迹 AI 家教 · 项目说明";
-    font-family: "Noto Sans CJK SC", sans-serif;
+    font-family: "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
     font-size: 8.5pt;
     color: #94a3b8;
   }
@@ -111,14 +111,14 @@ section.page { break-before: page; }
 }
 .cover .event { font-size: 10pt; color: var(--muted); letter-spacing: 0.5pt; }
 .cover h1 {
-  font-family: "Noto Serif CJK SC", serif;
+  font-family: "Noto Serif CJK SC", "Noto Serif SC", serif;
   font-size: 34pt;
   font-weight: 900;
   margin: 10mm 0 3mm;
   letter-spacing: 1pt;
 }
 .cover .sub {
-  font-family: "Noto Serif CJK SC", serif;
+  font-family: "Noto Serif CJK SC", "Noto Serif SC", serif;
   font-size: 19pt;
   color: var(--accent);
   font-weight: 700;
@@ -227,10 +227,10 @@ td.c { white-space: nowrap; }
 
 .team { display: grid; grid-template-columns: 1fr 1fr; gap: 3.5mm; }
 .team .box .who { color: var(--accent); font-weight: 700; }
-.team .box .dir { font-family: "DejaVu Sans Mono", monospace; font-size: 8.3pt; color: var(--muted); }
+.team .box .dir { font-family: "DejaVu Sans Mono", Consolas, monospace; font-size: 8.3pt; color: var(--muted); }
 
 code {
-  font-family: "DejaVu Sans Mono", monospace;
+  font-family: "DejaVu Sans Mono", Consolas, monospace;
   font-size: 8.6pt;
   background: #f1f5f9;
   border-radius: 2pt;

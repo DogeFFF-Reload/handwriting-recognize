@@ -22,7 +22,7 @@
   <div class="hero-cap">求解画面：手写的积分、极限、求和换成标准式子，算出的部分为绿色；右边 f(x) 的卡片里涂出了积分面积。（iPad 模拟器截图）</div>
   <div class="foot">
     <div><div class="k">作品形态</div>iPadOS 原生 App（Swift / SwiftUI / PencilKit）</div>
-    <div><div class="k">AI</div>MyScript 设备端数学识别 + 阿里云百炼 Qwen 视觉模型</div>
+    <div><div class="k">AI</div>阿里云百炼 Qwen 视觉模型（主识别）+ MyScript 设备端识别（兜底）</div>
     <div><div class="k">团队</div>RuikAn-n、DogeFFF、Interphynity、Drkarmic</div>
   </div>
 </section>
@@ -188,19 +188,19 @@
   <h3>AI 做什么：读懂手写</h3>
   <div class="grid2">
     <div class="box">
-      <h4>设备端：MyScript iink 数学识别</h4>
-      <ul class="small">
-        <li>直接读笔画，收成 LaTeX，笔迹不上传。</li>
-        <li>自动模式下排第一个：就绪就用它。</li>
-        <li>iink 每次启动会联网到 license.myscript.com 查一次授权。</li>
-      </ul>
-    </div>
-    <div class="box">
-      <h4>云端：阿里云百炼 Qwen 视觉模型</h4>
+      <h4>主识别（云端）：阿里云百炼 Qwen 视觉模型</h4>
       <ul class="small">
         <li>上传这一段笔迹的白底截图（PNG），模型只返回 <code>{"latex": …}</code>。</li>
         <li>先用 <code>qwen3.8-flash</code>（关闭思考），失败换 <code>qwen3-vl-plus</code>。</li>
-        <li>可直连百炼，也可经 Mac 上的 Server 转调。</li>
+        <li>设置里选「直连百炼」时排第一个；也可经 Mac 上的 Server 转调。</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h4>兜底（设备端）：MyScript iink 数学识别</h4>
+      <ul class="small">
+        <li>直接读笔画，收成 LaTeX，笔迹不上传。</li>
+        <li>千问出错、结果为空或没网时接手。</li>
+        <li>iink 每次启动会联网到 license.myscript.com 查一次授权。</li>
       </ul>
     </div>
   </div>
@@ -215,7 +215,7 @@
     <tr><th style="width:30%">环节</th><th style="width:16%">位置</th><th>说明</th></tr>
     <tr><td>采集笔画</td><td>设备</td><td>PencilKit</td></tr>
     <tr><td>决定何时识别、识别哪一段</td><td>设备</td><td>双击 Pencil 或点「完成一段」，只处理这一段</td></tr>
-    <tr><td>手写数学 → LaTeX</td><td>设备优先，云端接手</td><td>MyScript（设备）→ 百炼 Qwen（云端）→ Mac 上的 Server（转调 Qwen）</td></tr>
+    <tr><td>手写数学 → LaTeX</td><td>云端为主，设备兜底</td><td>百炼 Qwen（云端）→ MyScript（设备）→ Mac 上的 Server（转调 Qwen）</td></tr>
     <tr><td>求导、积分、极限、求和、解方程、矩阵</td><td>设备</td><td>Solver、MatrixMath、MathEngine</td></tr>
     <tr><td>几何识别、立体图形、三视图</td><td>设备</td><td>ShapeRecognizer、GeometrySketchRecognizer</td></tr>
     <tr><td>函数图像、公式渲染</td><td>设备</td><td>SceneUI、SwiftMath</td></tr>
@@ -227,13 +227,13 @@
 <section class="page">
   <h3 style="margin-top:0">怎么降级</h3>
   <ol>
-    <li><b>自动模式</b>：MyScript 就绪就用它；它出错或结果为空，换百炼（填了 Key 时）；再换 Server（填了地址时）。</li>
-    <li><b>指定引擎</b>：设置里可以选 MyScript、直连百炼、Server 或回放；指定的引擎没配好时按自动的顺序来，不直接退到回放。</li>
+    <li><b>千问优先（演示用）</b>：设置里选「直连百炼」并填 Key：先用千问；出错或结果为空，换 MyScript（就绪时），再换 Server（填了地址时）。</li>
+    <li><b>其他选项</b>：「自动」是 MyScript 先、再百炼、再 Server；也可以只指定 MyScript、Server 或回放。指定的引擎没配好时按自动的顺序来，不直接退到回放。</li>
     <li><b>回放</b>：三个引擎都没配置，或在设置里选「回放（断网）」时，按录好的 LaTeX 出结果（按「第几条、改过几轮、这一轮写了几笔」取）。彩排时打开「录制回放」，可以把真识别的结果录下来。Server 端默认在 3 秒没返回或出错时也放它录好的结果。</li>
     <li><b>认错了</b>：点式子「改式子」手动改 LaTeX，或「改笔迹」重写后再双击。链上的引擎都失败时，界面提示「没认出来」，App 不会自动切到回放。</li>
   </ol>
   <div class="note">
-    「不联网也能用」指的是识别之后的计算、作图和保存。MyScript 每次启动要联网查一次授权，没网时 iink 会怎样还没实测；断网时百炼也用不了，会场断网要在设置里切到「回放」，演示才能继续。</div>
+    「不联网也能用」指的是识别之后的计算、作图和保存。MyScript 每次启动要联网查一次授权，没网时 iink 会怎样还没实测；断网时千问用不了，识别链会退到 MyScript；但 MyScript 没网时的表现还没实测，所以会场断网最稳的做法是在设置里切到「回放」。</div>
 
   <!-- ======================= 5 完成度 ======================= -->
   <h2 style="margin-top:8mm"><span class="no">05</span>完成度和尚未验证的项</h2>

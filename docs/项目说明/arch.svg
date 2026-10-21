@@ -46,17 +46,17 @@
   <text class="t" x="34" y="150">识别链：这一段笔迹 → LaTeX</text>
   <text class="xs" x="506" y="150" text-anchor="end">按顺序试，出错或结果为空就换下一个</text>
 
-  <rect class="dev" x="32" y="164" width="104" height="76" rx="7"/>
-  <text class="t" x="84" y="186" text-anchor="middle">MyScript iink</text>
-  <text class="s" x="84" y="204" text-anchor="middle">设备端</text>
-  <text class="xs" x="84" y="220" text-anchor="middle">数学识别</text>
-  <text class="xs" x="84" y="233" text-anchor="middle">直接读笔画</text>
+  <rect class="cld" x="32" y="164" width="104" height="76" rx="7"/>
+  <text class="t" x="84" y="186" text-anchor="middle">百炼 Qwen</text>
+  <text class="s" x="84" y="204" text-anchor="middle">云端</text>
+  <text class="xs" x="84" y="220" text-anchor="middle">qwen3.8-flash</text>
+  <text class="xs" x="84" y="233" text-anchor="middle" style="font-size:9px">失败换 qwen3-vl-plus</text>
 
-  <rect class="cld" x="156" y="164" width="104" height="76" rx="7"/>
-  <text class="t" x="208" y="186" text-anchor="middle">百炼 Qwen</text>
-  <text class="s" x="208" y="204" text-anchor="middle">云端</text>
-  <text class="xs" x="208" y="220" text-anchor="middle">qwen3.8-flash</text>
-  <text class="xs" x="208" y="233" text-anchor="middle" style="font-size:9px">失败换 qwen3-vl-plus</text>
+  <rect class="dev" x="156" y="164" width="104" height="76" rx="7"/>
+  <text class="t" x="208" y="186" text-anchor="middle">MyScript iink</text>
+  <text class="s" x="208" y="204" text-anchor="middle">设备端兜底</text>
+  <text class="xs" x="208" y="220" text-anchor="middle">数学识别</text>
+  <text class="xs" x="208" y="233" text-anchor="middle">直接读笔画</text>
 
   <rect class="mac" x="280" y="164" width="104" height="76" rx="7"/>
   <text class="t" x="332" y="186" text-anchor="middle">Server</text>
