@@ -67,6 +67,43 @@ enum DemoInk {
         return out
     }
 
+    /// 按给的点直接连成一笔（几何演示用：草图的点由调用方生成），带一点手抖。
+    static func freehand(_ pts: [CGPoint], start: Date, color: UIColor = .black) -> PKStroke {
+        var seed: UInt64 = UInt64(abs(start.timeIntervalSinceReferenceDate.rounded())) | 1
+        func jitter() -> CGFloat {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            return CGFloat(Double(seed >> 33) / Double(1 << 31)) - 0.5
+        }
+        let points = pts.enumerated().map { i, q in
+            PKStrokePoint(location: CGPoint(x: q.x + jitter() * 1.6, y: q.y + jitter() * 1.6), timeOffset: Double(i) * 0.008,
+                          size: CGSize(width: 3.2, height: 3.2), opacity: 1, force: 1, azimuth: 0, altitude: .pi / 2)
+        }
+        return PKStroke(ink: PKInk(.pen, color: color), path: PKStrokePath(controlPoints: points, creationDate: start))
+    }
+
+    /// 两点之间的直线（几何演示用）。
+    static func segment(_ a: CGPoint, _ b: CGPoint, n: Int = 28) -> [CGPoint] {
+        (0...n).map { (i: Int) -> CGPoint in
+            let t = CGFloat(i) / CGFloat(n)
+            return CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
+        }
+    }
+
+    /// 线段两头各伸长 d（负数是缩短，留缝）：手画一笔一条边时常见的画过头 / 没碰上。
+    static func extend(_ a: CGPoint, _ b: CGPoint, by d: CGFloat) -> (CGPoint, CGPoint) {
+        let len = max(hypot(b.x - a.x, b.y - a.y), 1)
+        let ux: CGFloat = (b.x - a.x) / len, uy: CGFloat = (b.y - a.y) / len
+        return (CGPoint(x: a.x - ux * d, y: a.y - uy * d), CGPoint(x: b.x + ux * d, y: b.y + uy * d))
+    }
+
+    /// 椭圆弧（几何演示用）。
+    static func arc(_ c: CGPoint, _ a: CGFloat, _ b: CGFloat, from t0: CGFloat = 0, to t1: CGFloat = 2 * .pi, n: Int = 96) -> [CGPoint] {
+        (0...n).map { (i: Int) -> CGPoint in
+            let t = t0 + (t1 - t0) * CGFloat(i) / CGFloat(n)
+            return CGPoint(x: c.x + a * cos(t), y: c.y + b * sin(t))
+        }
+    }
+
     /// Catmull–Rom：过每个控制点的平滑曲线，每段取 10 个点。
     private static func smooth(_ c: [CGPoint]) -> [CGPoint] {
         guard c.count > 2 else {

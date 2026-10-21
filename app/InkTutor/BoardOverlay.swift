@@ -13,6 +13,11 @@ struct BoardOverlay: View {
 
             ForEach(app.ghosts) { GhostView(ghost: $0) }
 
+            // 几何图形画在纸上，式子和卡片在它上面
+            ForEach(app.shapes) { item in
+                ShapeView(item: item, app: app)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
             ForEach(app.functions) { item in
                 FormulaView(item: item, app: app)
             }
@@ -27,19 +32,54 @@ struct BoardOverlay: View {
             // 式子的操作条画在卡片上面，不会被挂在右上角的卡片挡住
             if case .formula(let id)? = app.selection, let item = app.functions.first(where: { $0.id == id }), !item.showingInk {
                 FormulaActionBar(item: item, app: app)
+                    .scaleEffect(app.compact ? 0.86 : 1, anchor: .bottomLeading)
                     .pinned(.bottomLeading, at: CGPoint(x: item.frame.minX - 10, y: item.frame.minY - 14))
+                    .transition(.opacity.combined(with: .offset(y: 6)))
+            }
+
+            // 选中的几何图形：节点和信息条在最上层
+            if case .shape(let id)? = app.selection, let item = app.shapes.first(where: { $0.id == id }) {
+                ShapeHandles(item: item, app: app)
+                ShapeInfoBar(item: item, app: app)
+                    .scaleEffect(app.compact ? 0.86 : 1, anchor: infoBarAlignment(item) == .topLeading ? .topLeading : .bottomLeading)
+                    .pinned(infoBarAlignment(item), at: infoBarAnchor(item))
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
 
             ForEach(app.busy) { BusyOverlay(job: $0) }
 
             if let menu = app.menu {
-                SegmentMenu(state: menu, boardSize: app.boardSize, topInset: app.topInset, onChoose: { app.choose($0) }, onMatrix: { app.chooseMatrix($0) })
+                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInset, compact: app.compact, onChoose: { app.choose($0) }, onMatrix: { app.chooseMatrix($0) })
                     .transition(.opacity)
             }
 
-            ForEach(app.toasts) { ToastView(toast: $0, boardSize: app.boardSize) }
+            ForEach(app.toasts) { ToastView(toast: $0, visible: app.visibleRect) }
         }
+    }
+
+    /// 信息条放在图形上方；旋转手柄在上方时（多边形）放到下方，免得挡住手柄。
+    private func barBelow(_ item: ShapeItem) -> Bool {
+        let box = item.figure.bounds
+        guard let r = item.figure.handles.first(where: { $0.role == .rotate }) else {
+            return box.minY < app.visibleRect.minY + app.topInset + 70
+        }
+        return r.point.y < box.midY && box.maxY + 80 < app.visibleRect.maxY
+    }
+
+    private func infoBarAlignment(_ item: ShapeItem) -> Alignment {
+        barBelow(item) ? .topLeading : .bottomLeading
+    }
+
+    private func infoBarAnchor(_ item: ShapeItem) -> CGPoint {
+        let box = item.figure.bounds
+        let below = barBelow(item)
+        var gap: CGFloat = below ? 30 : 22
+        // 立体图形下方紧挨着是「拖动旋转」的手柄
+        if case .solid = item.figure, below { gap = 66 }
+        let v = app.visibleRect
+        let x = min(max(box.minX - 10, v.minX + 16), v.maxX - 560)
+        let y = below ? box.maxY + gap : max(box.minY - gap, v.minY + app.topInset + 8)
+        return CGPoint(x: max(x, v.minX + 16), y: y)
     }
 }
 
@@ -268,7 +308,8 @@ private struct GhostView: View {
 
 private struct ToastView: View {
     let toast: Toast
-    var boardSize: CGSize
+    /// 看得见的那块纸（画布坐标）：提示不跑到屏幕外。
+    var visible: CGRect
 
     private var icon: String {
         switch toast.style {
@@ -299,8 +340,8 @@ private struct ToastView: View {
         .overlay(Capsule().strokeBorder(tint.opacity(0.3)))
         .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
         .fixedSize()
-        .position(x: min(max(toast.point.x, 180), boardSize.width - 180),
-                  y: min(max(toast.point.y, 110), boardSize.height - 40))
+        .position(x: min(max(toast.point.x, visible.minX + 180), visible.maxX - 180),
+                  y: min(max(toast.point.y, visible.minY + 110), visible.maxY - 40))
         .allowsHitTesting(false)
         .transition(.scale(scale: 0.9).combined(with: .opacity))
     }

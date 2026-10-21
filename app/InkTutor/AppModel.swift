@@ -26,6 +26,8 @@ final class AppModel {
     // MARK: 画板上的东西
     private(set) var functions: [FunctionItem] = []
     private(set) var geometries: [GeometryItem] = []
+    /// 选「几何」认出来的图形（平面的、立体的），直接画在纸上。
+    private(set) var shapes: [ShapeItem] = []
     /// 选中的式子或卡片（显示操作条或变换框）。
     var selection: Selection?
     /// 正在手动改 LaTeX 的式子（操作条上的「改式子」）。
@@ -37,10 +39,22 @@ final class AppModel {
     private(set) var hasInk = false
     private(set) var canUndo = false
     private(set) var canRedo = false
-    /// 画板大小（ContentView 量好了告诉这里，用来把卡片摆在屏幕里）。
+    /// 屏幕上看得见的那块纸的大小（BoardScreen 量好了告诉这里）。
     var boardSize: CGSize = CGSize(width: 1180, height: 820)
-    /// 顶上工具栏占掉的高度（状态栏 24 + 上边距 8 + 胶囊 52 + 留白），卡片和菜单不往那里放。
-    let topInset: CGFloat = 100
+    /// 窗口化（台前调度、分屏，或者窗口比屏幕小）：工具栏只剩笔、橡皮、清空、设置四个小按键，
+    /// 笔尖旁的菜单、新卡片、操作条也都缩小，少挡纸。BoardScreen 按窗口大小设。
+    var compact = false
+    /// 顶上工具栏占掉的高度（状态栏 24 + 上边距 8 + 胶囊 52 + 留白；窗口化时胶囊小、没有状态栏），卡片和菜单不往那里放。
+    var topInset: CGFloat { compact ? 58 : 100 }
+    /// 新函数卡片的默认大小。
+    var defaultCardSize: CGSize { compact ? CGSize(width: 270, height: 196) : CGSize(width: 360, height: 252) }
+    /// 纸往上滚了多少（画布坐标 = 屏幕坐标 + scrollOffset）。式子、卡片、图形都放在画布坐标里，跟着纸一起滚。
+    private(set) var scrollOffset: CGPoint = .zero
+    /// 纸有多长：至少三屏，写到靠近底下时自动接长。
+    private(set) var contentHeight: CGFloat = 0
+
+    /// 现在看得见的那块（画布坐标）：新卡片、菜单、提示都摆在这里面。
+    var visibleRect: CGRect { CGRect(origin: scrollOffset, size: boardSize) }
 
     @ObservationIgnored private weak var canvas: PKCanvasView?
     @ObservationIgnored private var drawing = PKDrawing()
@@ -49,6 +63,7 @@ final class AppModel {
     @ObservationIgnored private var pkByID: [String: PKStroke] = [:]
     @ObservationIgnored private var seen: Set<String> = []
     @ObservationIgnored private var lineNumbers: [String: Int] = [:]
+    @ObservationIgnored private var turnTask: Task<Void, Never>?
 
     init() {
         // 装机时从控制台就能看出 MyScript 缺不缺证书 / 资源（xcrun devicectl … --console）
@@ -86,6 +101,37 @@ final class AppModel {
         }
         functions.removeAll { $0.showingInk && $0.inkIDs.isEmpty && !hasStrokes(near: $0) }
         refreshUndo()
+        growPage()
+    }
+
+    // MARK: 滚动
+
+    /// 画布滚动了（PencilCanvas 的 scrollViewDidScroll）。滚到靠近底下时纸接长一屏。
+    func scrolled(to offset: CGPoint) {
+        scrollOffset = offset
+        let h = boardSize.height
+        if offset.y + h > contentHeight - h * 0.5 { contentHeight = offset.y + 2 * h }
+    }
+
+    /// 纸至少三屏长，而且比写到的最下面再多一屏。
+    func growPage() {
+        var bottom = drawing.strokes.isEmpty ? 0 : drawing.bounds.maxY
+        for f in functions { bottom = max(bottom, f.frame.maxY, f.card.minimized ? 0 : f.card.center.y + f.card.size.height / 2) }
+        for s in shapes { bottom = max(bottom, s.figure.bounds.maxY) }
+        for g in geometries { bottom = max(bottom, g.card.center.y + g.card.size.height / 2) }
+        let needed = max(3 * boardSize.height, bottom + boardSize.height)
+        if needed > contentHeight { contentHeight = needed }
+    }
+
+    /// 程序滚到某个位置（打开草稿时回到上次看的地方、演示）。
+    func scroll(to y: CGFloat) {
+        growPage()
+        let target = CGPoint(x: 0, y: max(0, min(y, contentHeight - boardSize.height)))
+        if let canvas {
+            canvas.contentSize = CGSize(width: boardSize.width, height: contentHeight)
+            canvas.setContentOffset(target, animated: false)
+        }
+        scrolled(to: target)
     }
 
     private func hasStrokes(near f: FunctionItem) -> Bool {
@@ -109,7 +155,7 @@ final class AppModel {
         }
         selection = nil
         guard let segment = segment(near: point) else {
-            toast("先写一段，写完再双击笔身", at: point ?? CGPoint(x: boardSize.width / 2, y: boardSize.height / 2), .info)
+            toast("先写一段，写完再双击笔身", at: point ?? CGPoint(x: visibleRect.midX, y: visibleRect.midY), .info)
             return
         }
         let tip = point ?? lastPenPoint(in: segment) ?? CGPoint(x: segment.bounds.maxX, y: segment.bounds.midY)
@@ -307,9 +353,11 @@ final class AppModel {
             item.size = size
         } else {
             let frame = CGRect(origin: origin, size: size)
+            let colorIndex = functions.filter { !$0.isComputed }.count
             item = FunctionItem(lineID: lineID, latex: latex, origin: origin, fontSize: fontSize, size: size,
-                                card: placeCard(next: frame, size: CGSize(width: 360, height: 252)),
-                                tint: Theme.curve(functions.filter { !$0.isComputed }.count))
+                                card: placeCard(next: frame, size: defaultCardSize),
+                                tint: Theme.curve(colorIndex))
+            item.tintIndex = colorIndex
             item.revision = revision
         }
         item.engine = r.engine
@@ -364,9 +412,12 @@ final class AppModel {
 
     /// 函数卡片默认挂在式子右上角；贴边放不下时挪进屏幕，还是会压住式子就放到式子下面。
     private func placeCard(next formula: CGRect, size: CGSize) -> CardFrame {
+        // 摆在看得见的那块纸里（纸可以滚）
+        let v = visibleRect
         func clamped(_ c: CGPoint) -> CGPoint {
-            CGPoint(x: min(max(c.x, size.width / 2 + 16), boardSize.width - size.width / 2 - 16),
-                    y: min(max(c.y, topInset + size.height / 2 + 8), boardSize.height - size.height / 2 - 16))
+            let x = min(max(c.x, v.minX + size.width / 2 + 16), v.maxX - size.width / 2 - 16)
+            let y = min(max(c.y, v.minY + topInset + size.height / 2 + 8), v.maxY - size.height / 2 - 16)
+            return CGPoint(x: x, y: y)
         }
         var c = clamped(CGPoint(x: formula.maxX + 18 + size.width / 2, y: formula.minY - 14 - size.height / 2))
         var rect = CGRect(x: c.x - size.width / 2, y: c.y - size.height / 2, width: size.width, height: size.height)
@@ -432,7 +483,8 @@ final class AppModel {
         var d = drawing
         d.strokes.append(contentsOf: item.ink)
         setDrawing(d)
-        item.inkIDs = item.inkSourceIDs
+        // 按笔画本身重新取 id（重新打开的草稿里，原来记的 id 已经对不上了）
+        item.inkIDs = item.ink.map { ids.id(for: $0) }
         withAnimation(.easeOut(duration: 0.2)) { item.showingInk = true }
         let again = item.solution.flatMap { MatrixMath.action(for: $0.operation) } != nil ? "矩阵" : (item.isComputed ? "求解" : "函数")
         toast("改完后双击笔身，选「\(again)」重新识别",
@@ -753,9 +805,11 @@ final class AppModel {
     private func convertToFunction(_ item: FunctionItem, latex: String) {
         let size = MathLabel.measure(latex, fontSize: item.fontSize)
         let frame = CGRect(origin: item.origin, size: size)
+        let colorIndex = functions.filter { !$0.isComputed }.count
         let new = FunctionItem(lineID: item.lineID, latex: latex, origin: item.origin, fontSize: item.fontSize, size: size,
-                               card: placeCard(next: frame, size: CGSize(width: 360, height: 252)),
-                               tint: Theme.curve(functions.filter { !$0.isComputed }.count))
+                               card: placeCard(next: frame, size: defaultCardSize),
+                               tint: Theme.curve(colorIndex))
+        new.tintIndex = colorIndex
         withAnimation(.easeOut(duration: 0.2)) {
             replaceItem(item, with: new)
             new.engine = "手动"
@@ -799,13 +853,90 @@ final class AppModel {
 
     // MARK: 几何
 
+    /// 选「几何」：认出草图里的平面图形（圆、椭圆、正方形、三角形……）和立体图形（正方体、圆柱、圆锥、球……），
+    /// 换成标准的图形画在原处，选中后拖节点改。三角形加中线的草图沿用 P3 的动态几何卡片（中点、重心跟着拖）。
     private func buildGeometry(_ seg: InkSegment) {
         let s = strokes.filter { seg.strokeIDs.contains($0.id) }
-        guard let sketch = GeometrySketchRecognizer.recognize(strokes: s), let json = try? sketch.jsonData(),
-              let scene = try? JSONDecoder().decode(GeometryScene.self, from: json) else {
-            toast("这张图收不进来：现在只认三角形和中线", at: CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24), .warning)
+        if let sketch = GeometrySketchRecognizer.recognize(strokes: s), !sketch.relations.isEmpty, let json = try? sketch.jsonData(),
+           let scene = try? JSONDecoder().decode(GeometryScene.self, from: json) {
+            buildMedianCard(seg, scene: scene)
             return
         }
+        let figures = ShapeRecognizer.recognize(strokes: s)
+        guard !figures.isEmpty else {
+            toast("没认出图形：线画直一点、圈画圆一点再试", at: CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24), .warning)
+            return
+        }
+        let ink = seg.strokeIDs.compactMap { pkByID[$0] }
+        fadeOut(ink, in: seg.bounds)
+        removeStrokes(Set(seg.strokeIDs))
+        let group = UUID()
+        let items = figures.enumerated().map { ShapeItem(figure: $0.element, group: group, ink: $0.offset == 0 ? ink : []) }
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) { shapes += items }
+        // 选中最大的那个：节点一出来就知道能拖
+        if let main = items.max(by: { $0.figure.bounds.width * $0.figure.bounds.height < $1.figure.bounds.width * $1.figure.bounds.height }) {
+            selection = .shape(main.id)
+        }
+    }
+
+    private func fadeOut(_ ink: [PKStroke], in rect: CGRect) {
+        guard let image = snapshot(of: ink, in: rect) else { return }
+        let ghost = InkGhost(image: image, frame: rect.insetBy(dx: -6, dy: -6))
+        ghosts.append(ghost)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in self?.ghosts.removeAll { $0.id == ghost.id } }
+    }
+
+    /// 拖节点、旋转、改视角之后的样子。
+    func update(_ item: ShapeItem, to figure: Figure) {
+        item.figure = figure
+    }
+
+    /// 三视图按钮：平滑地转到主视、左视、俯视或斜着看（只动视角，尺寸、位置不变）。
+    func turn(_ item: ShapeItem, to target: Solid3) {
+        guard case .solid(let from) = item.figure else { return }
+        turnTask?.cancel()
+        let dYaw = atan2(sin(target.yaw - from.yaw), cos(target.yaw - from.yaw))
+        turnTask = Task { @MainActor in
+            let steps = 22
+            for k in 1...steps {
+                try? await Task.sleep(nanoseconds: 15_000_000)
+                if Task.isCancelled { return }
+                let t = Double(k) / Double(steps)
+                let ease = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+                guard case .solid(var s) = item.figure else { return }
+                s.yaw = from.yaw + dYaw * ease
+                s.pitch = from.pitch + (target.pitch - from.pitch) * ease
+                item.figure = .solid(s)
+            }
+        }
+    }
+
+    /// 「变立体」：正方形 → 正方体，圆 → 圆柱……
+    func extrude(_ item: ShapeItem, to kind: Solid3.Kind) {
+        guard let f = item.figure.extruded(kind) else { return }
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.8)) { item.figure = f }
+    }
+
+    /// 把这一组图形收回成原来的笔迹。
+    func restoreInk(_ item: ShapeItem) {
+        let group = shapes.filter { $0.group == item.group }
+        var d = drawing
+        d.strokes.append(contentsOf: group.flatMap(\.ink))
+        setDrawing(d)
+        if let sel = selection, group.contains(where: { $0.id == sel.id }) { selection = nil }
+        withAnimation(.easeOut(duration: 0.2)) { shapes.removeAll { $0.group == item.group } }
+    }
+
+    func delete(_ item: ShapeItem) {
+        if selection?.id == item.id { selection = nil }
+        // 笔迹交给同组的下一个图形，「还原笔迹」还找得回来
+        if !item.ink.isEmpty, let heir = shapes.first(where: { $0.group == item.group && $0.id != item.id }) {
+            heir.ink = item.ink
+        }
+        withAnimation(.easeOut(duration: 0.2)) { shapes.removeAll { $0.id == item.id } }
+    }
+
+    private func buildMedianCard(_ seg: InkSegment, scene: GeometryScene) {
         let ink = seg.strokeIDs.compactMap { pkByID[$0] }
         // 卡片就放在草图原来的位置（GeometryView 四周留 48 pt，点基本落在原处）
         let rect = seg.bounds.insetBy(dx: -48, dy: -56)
@@ -850,6 +981,7 @@ final class AppModel {
         withAnimation(.easeOut(duration: 0.2)) {
             functions = []
             geometries = []
+            shapes = []
         }
         setDrawing(PKDrawing())
         lineNumbers = [:]
@@ -1011,6 +1143,29 @@ extension AppModel {
             loadSolveDemo()
             return
         }
+        if name == "shapes" || name == "solids" {
+            loadShapesDemo(solids: name == "solids")
+            return
+        }
+        // 窗口化的样子（BoardScreen 按 -demo compact 强制成小号工具栏）
+        if name == "compact" {
+            loadDemo("reveal")
+            return
+        }
+        // 卡片右上角的小眼睛关上：只剩函数图像和坐标轴
+        if name == "clean" {
+            loadDemo("reveal")
+            eraserOn = false
+            selection = nil
+            functions.first { $0.graph != nil }?.minimal = true
+            return
+        }
+        // 纸往下滚了一段：笔迹、式子、卡片、横线一起移动
+        if name == "scrolled" {
+            loadDemo("solve")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.scroll(to: 240) }
+            return
+        }
         clear()
         let left: CGFloat = 120
         if name == "menu" {
@@ -1051,8 +1206,65 @@ extension AppModel {
                                  size: MathLabel.measure("g(x)=\\sin x", fontSize: 34),
                                  card: CardFrame(center: CGPoint(x: 700, y: 640), size: CGSize(width: 360, height: 252), minimized: true),
                                  tint: Theme.curve(1))
+            g.tintIndex = 1
             apply(latex: g.latex, to: g)
             functions.append(g)
+        }
+    }
+
+    /// -demo shapes：手画的正方形、椭圆、直角三角形认出来，椭圆选中（焦点、节点）。
+    /// -demo solids：手画的正方体、圆柱、圆锥认出来，正方体选中（尺寸节点、拖动旋转、三视图）。
+    private func loadShapesDemo(solids: Bool) {
+        clear()
+        var clock = 800_000_000.0
+        func draw(_ sketch: [[CGPoint]]) {
+            var d = drawing
+            for pts in sketch {
+                clock += 1
+                d.strokes.append(DemoInk.freehand(pts, start: Date(timeIntervalSinceReferenceDate: clock)))
+            }
+            setDrawing(d)
+            if let seg = segment(near: nil) { buildGeometry(seg) }
+        }
+        let y: CGFloat = 400
+        if !solids {
+            // 正方形歪了 2°：认出来会摆正
+            let c = CGPoint(x: 250, y: y)
+            let ct: CGFloat = cos(0.04), st: CGFloat = sin(0.04)
+            let offsets: [CGPoint] = [CGPoint(x: -95, y: -95), CGPoint(x: 95, y: -95), CGPoint(x: 95, y: 95),
+                                      CGPoint(x: -95, y: 95), CGPoint(x: -95, y: -95)]
+            let sq = offsets.map { (o: CGPoint) -> CGPoint in
+                CGPoint(x: c.x + o.x * ct - o.y * st, y: c.y + o.x * st + o.y * ct)
+            }
+            // 正方形四笔画，角上留了缝；三角形三笔画，每笔都画过了头：一样认成一个图形
+            draw(zip(sq, sq.dropFirst()).map { pair -> [CGPoint] in
+                let (p, q) = DemoInk.extend(pair.0, pair.1, by: -9)
+                return DemoInk.segment(p, q)
+            })
+            draw([DemoInk.arc(CGPoint(x: 640, y: y), 160, 88, from: 0.2, to: 0.2 + 2.05 * .pi)])
+            let a = CGPoint(x: 940, y: y - 120), b = CGPoint(x: 944, y: y + 110), t = CGPoint(x: 1180, y: y + 108)
+            let sides: [(CGPoint, CGPoint)] = [(a, b), (b, t), (t, a)]
+            draw(sides.map { e -> [CGPoint] in
+                let (p, q) = DemoInk.extend(e.0, e.1, by: 16)
+                return DemoInk.segment(p, q)
+            })
+            if let e = shapes.first(where: { if case .ellipse = $0.figure { return true }; return false }) { selection = .shape(e.id) }
+        } else {
+            // 正方体：前后两个正方形 + 四条连线
+            let f = [CGPoint(x: 140, y: 340), CGPoint(x: 310, y: 340), CGPoint(x: 310, y: 510), CGPoint(x: 140, y: 510)]
+            let back = f.map { CGPoint(x: $0.x + 80, y: $0.y - 70) }
+            let loop = { (v: [CGPoint]) in (0..<4).flatMap { DemoInk.segment(v[$0], v[($0 + 1) % 4]) } }
+            draw([loop(f), loop(back)] + (0..<4).map { DemoInk.segment(f[$0], back[$0]) })
+            // 圆柱：上底整个椭圆、下底前半个、两条母线
+            let top = CGPoint(x: 640, y: 290), bottom = CGPoint(x: 640, y: 520)
+            draw([DemoInk.arc(top, 105, 32), DemoInk.segment(CGPoint(x: 535, y: 292), CGPoint(x: 536, y: 518)),
+                  DemoInk.segment(CGPoint(x: 745, y: 290), CGPoint(x: 744, y: 521)), DemoInk.arc(bottom, 105, 32, from: 0, to: .pi)])
+            // 圆锥：底面 + 交于顶点的两条线
+            let base = CGPoint(x: 1040, y: 520), apex = CGPoint(x: 1042, y: 270)
+            draw([DemoInk.arc(base, 110, 34), DemoInk.segment(apex, CGPoint(x: 930, y: 520)), DemoInk.segment(apex, CGPoint(x: 1150, y: 520))])
+            if let cube = shapes.first(where: { if case .solid(let s) = $0.figure { return s.kind == .cube }; return false }) {
+                selection = .shape(cube.id)
+            }
         }
     }
 
@@ -1082,5 +1294,92 @@ extension AppModel {
         if let integral = functions.first(where: { $0.solution?.operation == .integral }) { selection = .formula(integral.id) }
         f.card.size = CGSize(width: 430, height: 330)
         f.card.center = CGPoint(x: max(f.anchor.x, 640) + 24 + 215, y: max(f.anchor.y - 12 - 165, topInset + 175))
+    }
+}
+
+// MARK: - 存盘、打开（多份草稿）
+
+extension AppModel {
+    /// 纸上的东西（笔迹另存）。算出来的结果不存：重新打开时按 LaTeX 重新求。
+    func snapshot() -> BoardSnapshot {
+        var index: [UUID: Int] = [:]
+        for (i, f) in functions.enumerated() { index[f.id] = i }
+        let fs = functions.map { (f: FunctionItem) -> FunctionSnapshot in
+            let kind: FunctionSnapshot.Kind = f.derivedFrom != nil ? .derivative : f.solveSource != nil ? .solve : .function
+            var params: [String: Double] = [:]
+            for p in f.graph?.params ?? [] { params[p.name] = p.value }
+            return FunctionSnapshot(kind: kind, lineID: f.lineID, latex: f.latex, origin: f.origin, fontSize: f.fontSize, size: f.size,
+                                    card: CardSnapshot(f.card), tintIndex: f.tintIndex, showsSliders: f.showsSliders, minimal: f.minimal,
+                                    engine: f.engine, ms: f.ms, ink: PKDrawing(strokes: f.ink).dataRepresentation(),
+                                    parent: f.derivedFrom.flatMap { index[$0] }, request: f.request, solveSource: f.solveSource,
+                                    params: params, reveal: f.graph?.reveal ?? false)
+        }
+        let ss = shapes.map { (s: ShapeItem) -> ShapeSnapshot in
+            ShapeSnapshot(figure: s.figure, group: s.group, ink: PKDrawing(strokes: s.ink).dataRepresentation(), showsLabels: s.showsLabels)
+        }
+        let gs = geometries.map { (g: GeometryItem) -> GeometrySnapshot in
+            GeometrySnapshot(geometry: g.geometry, points: g.scene.freePoints, card: CardSnapshot(g.card),
+                             ink: PKDrawing(strokes: g.ink).dataRepresentation())
+        }
+        return BoardSnapshot(functions: fs, shapes: ss, geometries: gs, lineNumbers: lineNumbers, scrollY: scrollOffset.y)
+    }
+
+    /// 纸上的笔迹（PKDrawing 数据）。
+    var drawingData: Data { drawing.dataRepresentation() }
+
+    /// 打开一份草稿：先放笔迹，再一条条重建式子（函数 → 导数 → 求解），最后按存的样子摆卡片。
+    func restore(_ snap: BoardSnapshot?, drawing d: PKDrawing) {
+        menu = nil
+        selection = nil
+        functions = []
+        shapes = []
+        geometries = []
+        lineNumbers = snap?.lineNumbers ?? [:]
+        setDrawing(d)
+        guard let snap else { return }
+        func strokes(_ data: Data) -> [PKStroke] { (try? PKDrawing(data: data))?.strokes ?? [] }
+
+        var items: [FunctionItem] = []
+        for s in snap.functions {
+            let tint = s.tintIndex >= 0 ? Theme.curve(s.tintIndex) : Theme.ok
+            let item = FunctionItem(lineID: s.lineID, latex: s.latex, origin: s.origin, fontSize: s.fontSize, size: s.size,
+                                    card: s.card.frame, tint: tint)
+            item.tintIndex = s.tintIndex
+            item.showsSliders = s.showsSliders
+            item.minimal = s.minimal
+            item.engine = s.engine
+            item.ms = s.ms
+            item.ink = strokes(s.ink)
+            if s.kind == .solve { item.solveSource = s.solveSource ?? s.latex }
+            items.append(item)
+        }
+        functions = items
+        for (s, item) in zip(snap.functions, items) where s.kind == .function {
+            apply(latex: s.latex, to: item)
+            for (name, value) in s.params { item.graph?.setParam(name, to: value) }
+        }
+        for (s, item) in zip(snap.functions, items) where s.kind == .derivative {
+            if let p = s.parent, items.indices.contains(p), let r = s.request {
+                setDerivative(item, request: r, parent: items[p])
+            }
+        }
+        recomputeSolutions(using: nil)
+        // 求导、求解时会把原函数的卡片展开、标上导函数：按存的样子摆回去
+        for (s, item) in zip(snap.functions, items) {
+            item.card = s.card.frame
+            item.origin = s.origin
+            item.graph?.reveal = s.reveal
+        }
+        shapes = snap.shapes.map { (s: ShapeSnapshot) -> ShapeItem in
+            let item = ShapeItem(figure: s.figure, group: s.group, ink: strokes(s.ink))
+            item.showsLabels = s.showsLabels
+            return item
+        }
+        geometries = snap.geometries.map { (g: GeometrySnapshot) -> GeometryItem in
+            let item = GeometryItem(geometry: g.geometry, ink: strokes(g.ink), card: g.card.frame)
+            item.scene.freePoints = g.points
+            return item
+        }
+        growPage()
     }
 }

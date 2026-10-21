@@ -371,7 +371,7 @@ extension MathExpr {
 
 /// 学生写在函数下面的「f'(x)」「f''(x)」「y'」「f'(2)」：要对哪个函数求几阶导，在哪一点取值。
 /// 等号后面写了什么都不看（不再批改，直接求出来）。
-public struct DerivativeRequest: Equatable {
+public struct DerivativeRequest: Equatable, Codable {
     /// 函数名：f、g、y……
     public var name: String
     /// 几阶导：f' 是 1，f'' 是 2。

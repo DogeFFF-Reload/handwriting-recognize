@@ -252,8 +252,9 @@ struct FunctionCard: View {
                     header(graph)
                 } content: { interactive in
                     VStack(spacing: 0) {
-                        FunctionGraphView(model: graph, name: item.name, tint: item.tint, interactive: interactive && !item.showingInk)
-                        if item.showsSliders, graph.hasSliders {
+                        FunctionGraphView(model: graph, name: item.name, tint: item.tint, interactive: interactive && !item.showingInk,
+                                          minimal: item.minimal)
+                        if item.showsSliders, graph.hasSliders, !item.minimal {
                             Rectangle().fill(Theme.hairline).frame(height: 1)
                             GraphSliders(model: graph, tint: item.tint) { app.coefficientsChanged(item) }
                                 .padding(.horizontal, 14)
@@ -286,13 +287,17 @@ struct FunctionCard: View {
     private func header(_ graph: GraphModel) -> some View {
         HStack(spacing: 8) {
             CurveGlyph(tint: item.tint)
-            MathLabel(item.latex, fontSize: 15, color: .label)
-                .fixedSize()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .mask(LinearGradient(stops: [.init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
-                                     startPoint: .leading, endPoint: .trailing))
-                .clipped()
-            if graph.reveal {
+            if item.minimal {
+                Spacer(minLength: 0)
+            } else {
+                MathLabel(item.latex, fontSize: 15, color: .label)
+                    .fixedSize()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .mask(LinearGradient(stops: [.init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
+                                         startPoint: .leading, endPoint: .trailing))
+                    .clipped()
+            }
+            if graph.reveal, !item.minimal {
                 // 图例：绿色虚线是导函数
                 HStack(spacing: 5) {
                     Path { p in
@@ -307,7 +312,7 @@ struct FunctionCard: View {
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Theme.ok.opacity(0.12), in: Capsule())
             }
-            if graph.hasSliders {
+            if graph.hasSliders, !item.minimal {
                 HeaderButton(systemImage: "slider.horizontal.3", active: item.showsSliders, help: "参数滑条") {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                         if !item.showsSliders {
@@ -317,6 +322,11 @@ struct FunctionCard: View {
                         item.showsSliders.toggle()
                     }
                 }
+            }
+            // 小眼睛：简洁模式只留函数图像和坐标轴
+            HeaderButton(systemImage: item.minimal ? "eye.slash" : "eye", active: item.minimal,
+                         help: item.minimal ? "显示参数、切线和式子" : "只看图像") {
+                withAnimation(.easeInOut(duration: 0.2)) { item.minimal.toggle() }
             }
             HeaderButton(systemImage: "arrow.down.right.and.arrow.up.left", help: "收起") {
                 withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {

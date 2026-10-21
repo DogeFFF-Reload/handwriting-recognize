@@ -9,15 +9,19 @@ import SwiftUI
 /// 用 Pencil 点选；再双击一次、落笔写字、或手指点空白处都会收起。
 struct SegmentMenu: View {
     let state: SegmentMenuState
-    var boardSize: CGSize
+    /// 看得见的那块纸（画布坐标）：圆钮不放到屏幕外、不钻到工具栏下面。
+    var visible: CGRect
     var topInset: CGFloat
+    /// 窗口化时整个菜单小一号。
+    var compact = false
     var onChoose: (SegmentKind) -> Void
     var onMatrix: (MatrixAction) -> Void
 
     @State private var shown = false
     @State private var phase: CGFloat = 0
 
-    private let radius: CGFloat = 92
+    private var radius: CGFloat { compact ? 68 : 92 }
+    private var size: CGFloat { compact ? 46 : 64 }
 
     private var kinds: [SegmentKind] {
         var list: [SegmentKind] = [.function, .solve]
@@ -81,7 +85,7 @@ struct SegmentMenu: View {
     private func fan(_ count: Int) -> [CGPoint] {
         let a = state.anchor
         let ink = state.segment.bounds.insetBy(dx: -8, dy: -8)
-        let half: CGFloat = 34
+        let half: CGFloat = size / 2 + 2
         let step = count > 3 ? 42.0 : 50.0
         let offsets = (0..<count).map { step * (Double($0) - Double(count - 1) / 2) }
         func spots(_ center: Double) -> [CGPoint] {
@@ -93,15 +97,16 @@ struct SegmentMenu: View {
         func fits(_ ps: [CGPoint]) -> Bool {
             ps.allSatisfy { p in
                 let box = CGRect(x: p.x - half, y: p.y - half, width: 2 * half, height: 2 * half)
-                return !box.intersects(ink) && box.minX > 8 && box.maxX < boardSize.width - 8
-                    && box.minY > topInset && box.maxY < boardSize.height - 8
+                return !box.intersects(ink) && box.minX > visible.minX + 8 && box.maxX < visible.maxX - 8
+                    && box.minY > visible.minY + topInset && box.maxY < visible.maxY - 8
             }
         }
         for center in [-60.0, -90, -30, 0, -120, -150, 180, 30, 150, 60, 120, 90] where fits(spots(center)) {
             return spots(center)
         }
         return spots(-90).map {
-            CGPoint(x: min(max($0.x, 44), boardSize.width - 44), y: min(max($0.y, topInset + 40), boardSize.height - 44))
+            CGPoint(x: min(max($0.x, visible.minX + 44), visible.maxX - 44),
+                    y: min(max($0.y, visible.minY + topInset + 40), visible.maxY - 44))
         }
     }
 
@@ -117,8 +122,8 @@ struct SegmentMenu: View {
         let center = CGPoint(x: matrix.x + ux * 108, y: matrix.y + uy * 108)
         return (-1...1).map { i in
             let p = CGPoint(x: center.x + sx * CGFloat(i) * 128, y: center.y + sy * CGFloat(i) * 128)
-            return CGPoint(x: min(max(p.x, 64), boardSize.width - 64),
-                           y: min(max(p.y, topInset + 22), boardSize.height - 22))
+            return CGPoint(x: min(max(p.x, visible.minX + 64), visible.maxX - 64),
+                           y: min(max(p.y, visible.minY + topInset + 22), visible.maxY - 22))
         }
     }
 
@@ -129,12 +134,13 @@ struct SegmentMenu: View {
         } label: {
             VStack(spacing: 1) {
                 glyph(kind)
-                    .frame(height: 24)
+                    .frame(height: compact ? 17 : 24)
+                    .scaleEffect(compact ? 0.75 : 1)
                 Text(kind.title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: compact ? 9 : 11, weight: .semibold))
             }
             .foregroundStyle(primary ? Color.white : Color.primary)
-            .frame(width: 64, height: 64)
+            .frame(width: size, height: size)
             .background {
                 if primary {
                     Circle().fill(kind == .matrix ? Theme.ok : Theme.accent)
