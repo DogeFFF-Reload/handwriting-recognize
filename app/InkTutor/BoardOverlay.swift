@@ -36,7 +36,7 @@ struct BoardOverlay: View {
             // 式子的操作条画在卡片上面，不会被挂在右上角的卡片挡住
             if case .formula(let id)? = app.selection, let item = app.functions.first(where: { $0.id == id }), !item.showingInk {
                 FormulaActionBar(item: item, app: app)
-                    .scaleEffect(app.compact ? 0.86 : 1, anchor: .bottomLeading)
+                    .scaleEffect(chromeScale, anchor: .bottomLeading)
                     .pinned(.bottomLeading, at: CGPoint(x: item.frame.minX - 10, y: item.frame.minY - 14))
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
@@ -45,7 +45,7 @@ struct BoardOverlay: View {
             if case .shape(let id)? = app.selection, let item = app.shapes.first(where: { $0.id == id }) {
                 ShapeHandles(item: item, app: app)
                 ShapeInfoBar(item: item, app: app)
-                    .scaleEffect(app.compact ? 0.86 : 1, anchor: infoBarAlignment(item) == .topLeading ? .topLeading : .bottomLeading)
+                    .scaleEffect(chromeScale, anchor: infoBarAlignment(item) == .topLeading ? .topLeading : .bottomLeading)
                     .pinned(infoBarAlignment(item), at: infoBarAnchor(item))
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
@@ -53,19 +53,22 @@ struct BoardOverlay: View {
             ForEach(app.busy) { BusyOverlay(job: $0) }
 
             if let menu = app.menu {
-                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInset, compact: app.compact, onChoose: { app.choose($0) }, onMatrix: { app.chooseMatrix($0) })
+                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInsetOnPaper, compact: app.compact, zoom: app.zoom, onChoose: { app.choose($0) }, onMatrix: { app.chooseMatrix($0) })
                     .transition(.opacity)
             }
 
-            ForEach(app.toasts) { ToastView(toast: $0, visible: app.visibleRect) }
+            ForEach(app.toasts) { ToastView(toast: $0, visible: app.visibleRect, zoom: app.zoom) }
         }
     }
+
+    /// 操作条、信息条在屏幕上的大小：窗口化时小一号；纸放大缩小时反过来缩回去，屏幕上不变。
+    private var chromeScale: CGFloat { (app.compact ? 0.86 : 1) / app.zoom }
 
     /// 信息条放在图形上方；旋转手柄在上方时（多边形）放到下方，免得挡住手柄。
     private func barBelow(_ item: ShapeItem) -> Bool {
         let box = item.figure.bounds
         guard let r = item.figure.handles.first(where: { $0.role == .rotate }) else {
-            return box.minY < app.visibleRect.minY + app.topInset + 70
+            return box.minY < app.visibleRect.minY + app.topInsetOnPaper + 70 / app.zoom
         }
         return r.point.y < box.midY && box.maxY + 80 < app.visibleRect.maxY
     }
@@ -81,8 +84,8 @@ struct BoardOverlay: View {
         // 立体图形下方紧挨着是「拖动旋转」的手柄
         if case .solid = item.figure, below { gap = 66 }
         let v = app.visibleRect
-        let x = min(max(box.minX - 10, v.minX + 16), v.maxX - 560)
-        let y = below ? box.maxY + gap : max(box.minY - gap, v.minY + app.topInset + 8)
+        let x = min(max(box.minX - 10, v.minX + 16 / app.zoom), v.maxX - 560 / app.zoom)
+        let y = below ? box.maxY + gap : max(box.minY - gap, v.minY + app.topInsetOnPaper + 8 / app.zoom)
         return CGPoint(x: max(x, v.minX + 16), y: y)
     }
 }
@@ -116,6 +119,7 @@ struct FormulaView: View {
             .frame(height: 34)
             .background(.regularMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.hairline))
+            .scaleEffect(1 / app.zoom, anchor: .topLeading)
             .pinned(.topLeading, at: CGPoint(x: item.frame.minX, y: item.frame.maxY + 14))
             .transition(.opacity)
         } else {
@@ -296,7 +300,7 @@ struct CheckView: View {
                 }
                 if talking, let message = item.message {
                     bubble(message)
-                        .scaleEffect(app.compact ? 0.86 : 1, anchor: .topLeading)
+                        .scaleEffect((app.compact ? 0.86 : 1) / app.zoom, anchor: .topLeading)
                         .pinned(.topLeading, at: bubbleAnchor)
                         .transition(.opacity.combined(with: .offset(y: -6)))
                 }
@@ -321,8 +325,8 @@ struct CheckView: View {
     private var bubbleAnchor: CGPoint {
         let v = app.visibleRect
         let x0 = (item.ok ? item.band.minX : item.marks.first?.rect.minX ?? item.band.minX) - 12
-        let x = min(max(x0, v.minX + 16), v.maxX - 340)
-        return CGPoint(x: max(x, v.minX + 16), y: item.band.maxY + 16)
+        let x = min(max(x0, v.minX + 16 / app.zoom), v.maxX - 340 / app.zoom)
+        return CGPoint(x: max(x, v.minX + 16 / app.zoom), y: item.band.maxY + 16)
     }
 
     private func bubble(_ message: String) -> some View {
@@ -370,6 +374,7 @@ struct CheckView: View {
         .frame(height: 32)
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Theme.hairline))
+        .scaleEffect(1 / app.zoom, anchor: .topLeading)
         .pinned(.topLeading, at: CGPoint(x: item.band.minX, y: item.band.maxY + 12))
         .allowsHitTesting(false)
         .transition(.opacity)
@@ -433,6 +438,8 @@ private struct ToastView: View {
     let toast: Toast
     /// 看得见的那块纸（画布坐标）：提示不跑到屏幕外。
     var visible: CGRect
+    /// 纸放大了几倍：提示反过来缩回去，屏幕上始终一样大。
+    var zoom: CGFloat = 1
 
     private var icon: String {
         switch toast.style {
@@ -463,8 +470,9 @@ private struct ToastView: View {
         .overlay(Capsule().strokeBorder(tint.opacity(0.3)))
         .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
         .fixedSize()
-        .position(x: min(max(toast.point.x, visible.minX + 180), visible.maxX - 180),
-                  y: min(max(toast.point.y, visible.minY + 110), visible.maxY - 40))
+        .scaleEffect(1 / zoom)
+        .position(x: min(max(toast.point.x, visible.minX + 180 / zoom), visible.maxX - 180 / zoom),
+                  y: min(max(toast.point.y, visible.minY + 110 / zoom), visible.maxY - 40 / zoom))
         .allowsHitTesting(false)
         .transition(.scale(scale: 0.9).combined(with: .opacity))
     }

@@ -93,6 +93,8 @@ struct BoardScreen: View {
             }
             .padding(.top, 8)
         }
+        // 只有 ZoomBadge 自己读 zoom：捏合时整屏不重算
+        .overlay(alignment: .bottomTrailing) { ZoomBadge(app: app) }
         .animation(.easeOut(duration: 0.25), value: app.hasInk)
         .sheet(isPresented: $showSettings) { SettingsView() }
         .alert("重命名草稿", isPresented: $renaming) {
@@ -111,9 +113,9 @@ struct BoardScreen: View {
             let (snap, drawing) = library.read(meta.id)
             app.restore(snap, drawing: drawing)
             lastSaved = (try? BoardLibrary.encoder.encode(app.snapshot())).map { ($0, app.drawingData) }
-            if let y = snap?.scrollY, y > 0 {
+            if let snap, snap.scrollY > 0 || (snap.scrollX ?? 0) > 0 || (snap.zoom ?? 1) != 1 {
                 try? await Task.sleep(nanoseconds: 100_000_000)
-                app.scroll(to: y)
+                app.scroll(to: snap.scrollY, x: snap.scrollX ?? 0, zoom: snap.zoom ?? 1)
             }
             // 开着的时候每 3 秒看一次，有变化就存；缩略图最多一分钟换一次（App 被直接关掉时画廊里也是新的）
             var lastThumb = Date()
@@ -171,7 +173,9 @@ struct BoardScreen: View {
     }
 }
 
-/// 式子、卡片、图形那一层：用画布坐标摆放，纸滚多少它就移多少。只有这一层读 scrollOffset，滚动时别的不重算。
+/// 式子、卡片、图形那一层：用画布坐标摆放，纸滚多少它就移多少、纸放大几倍它就放大几倍。
+/// 只有这一层读 scrollOffset 和 zoom，滚动、缩放时别的不重算。
+/// 拖动手势在缩放之前的坐标系（Board.space）里量，量出来就是画布坐标。
 private struct ScrollingOverlay: View {
     var app: AppModel
 
@@ -179,7 +183,46 @@ private struct ScrollingOverlay: View {
         BoardOverlay(app: app)
             .frame(width: max(app.contentWidth, app.boardSize.width), height: max(app.contentHeight, app.boardSize.height), alignment: .topLeading)
             .coordinateSpace(name: Board.space)
-            .offset(x: -app.scrollOffset.x, y: -app.scrollOffset.y)
+            .environment(\.inkZoom, app.zoom)
+            .scaleEffect(app.zoom, anchor: .topLeading)
+            .offset(x: -app.scrollOffset.x * app.zoom, y: -app.scrollOffset.y * app.zoom)
+    }
+}
+
+/// 缩放过时右下角显示倍数，点一下回到 100%。
+private struct ZoomBadge: View {
+    var app: AppModel
+
+    private var zoomed: Bool { abs(app.zoom - 1) > 0.01 }
+
+    var body: some View {
+        ZStack {
+            if zoomed {
+                button
+                    .padding(20)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: zoomed)
+    }
+
+    private var button: some View {
+        Button { app.resetZoom() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.left.and.down.right.magnifyingglass")
+                Text("\(Int((app.zoom * 100).rounded()))%").monospacedDigit()
+            }
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.hairline))
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.primary)
+        .hoverEffect(.highlight)
+        .accessibilityLabel("缩放 \(Int((app.zoom * 100).rounded()))%，点一下回到 100%")
     }
 }
 
@@ -189,19 +232,20 @@ struct PaperBackground: View {
 
     var body: some View {
         let offset = app.scrollOffset
+        let zoom = app.zoom
         Canvas { ctx, size in
-            // 第一条线在纸上 y = 132，往下每 76 一条；只画看得见的
+            // 第一条线在纸上 y = 132，往下每 76 一条；只画看得见的（纸放大几倍，线距跟着放大几倍）
             var rules = Path()
             let first = max(0, ((offset.y - 132) / 76).rounded(.up))
-            var y: CGFloat = 132 + first * 76 - offset.y
+            var y: CGFloat = (132 + first * 76 - offset.y) * zoom
             while y < size.height {
                 rules.move(to: CGPoint(x: 0, y: y))
                 rules.addLine(to: CGPoint(x: size.width, y: y))
-                y += 76
+                y += 76 * zoom
             }
             ctx.stroke(rules, with: .color(Theme.rule), lineWidth: 1)
             // 页边线在纸上 x = 64，纸往左滚时跟着出去
-            let x: CGFloat = 64 - offset.x
+            let x: CGFloat = (64 - offset.x) * zoom
             if x > 0 {
                 var margin = Path()
                 margin.move(to: CGPoint(x: x, y: 0))
