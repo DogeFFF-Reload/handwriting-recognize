@@ -50,3 +50,12 @@ Ubuntu 24.04 + Swift 6.0.3（和 CI 的 `swift:6.0` 同一个大版本）：
 - `swift test --package-path Server`：14 条全过（新增 1 条）
 
 App 的改动（`AppModel.resetReplay`）由分支最后一个带 `[mac]` 的 commit 触发 CI，在 macOS 上编整个 App 来验证。
+
+## 五、CI 和合并（写给合 main 的人）
+
+- **CI 还没真正跑过**：run 54（0c2c318）的 unit / server / ios-build 三个 job 都在 3 秒内结束，`runner_id` 是 0，也没有日志，说明根本没分到机器。同一时段 run 51–56 所有分支都是这样，所以不是这个分支代码的问题（具体原因 API 里看不到；可能是 Actions 额度或付款的问题，要仓库主人去 Settings › Billing 看一下）。所以 **App 部分还没在 macOS 上编过**。Linux 上的三套测试是在本机跑的，见上面第四节。
+- **本地试合并的结果**（只在本地试，没有推）：
+  - p1/redesign、p3/qwen-first：没有冲突。
+  - p3/qwen-solve：`Recognizers.swift` 冲突。它在 `FallbackRecognizer` 前面插了 `canonicalLatex` 和 `unbraceCells` 两个函数，两边又都改了 `FallbackRecognizer` 那行文档注释。解决办法：保留它插进来的那两个函数，`FallbackRecognizer` 的注释用本分支的。
+  - p4/grading：`AppModel.clear()` 冲突，因为它在同一个位置加了 `pendingChecks = [:]`。解决办法：两行都留（先 `pendingChecks = [:]`，再 `resetReplay()`），它那边那句旧注释删掉（已经挪到 `resetReplay()` 上面）。`restore()` 能自动合并。
+- p3/qwen-first 把「直连百炼」改成了千问 → MyScript → Server。合了以后，本分支的「每个引擎 15 秒」照样生效：断网时一般会马上失败，落到 MyScript；网络半通时，最多等 15 秒才落到 MyScript。
