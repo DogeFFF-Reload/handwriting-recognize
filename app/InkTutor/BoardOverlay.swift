@@ -288,9 +288,10 @@ struct CheckMarks: View {
         }
     }
 
-    /// 红圈：比错项的框大一圈，稍微歪一点，像手画的。
+    /// 红圈：比错项的框大一圈，稍微歪一点，像手画的。框已经比那一项外扩了 8 pt：
+    /// 横向只再放一点，免得把左边那一项的上标（3x² 的 2）也圈进来。
     private func ring(_ box: CGRect, number: Int?, focused: Bool) -> some View {
-        let r = box.insetBy(dx: -box.width * 0.16 - 4, dy: -box.height * 0.2 - 4)
+        let r = box.insetBy(dx: -min(box.width * 0.05, 8) - 2, dy: -box.height * 0.12 - 3)
         return ZStack(alignment: .topTrailing) {
             Ellipse()
                 .stroke(Theme.wrong.opacity(item.stale ? 0.28 : 0.9), style: StrokeStyle(lineWidth: focused ? 3 : 2.4, lineCap: .round))

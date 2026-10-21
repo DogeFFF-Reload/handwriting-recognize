@@ -1666,7 +1666,9 @@ extension AppModel {
               let g = demoFunction("f(x)=2x", latex: "g\\left( x\\right) =2x+3", y: 330, start: 800_000_100) else { return }
         merge(g, into: f)
         f.card.size = CGSize(width: 460, height: 360)
-        f.card.center = CGPoint(x: max(f.anchor.x, 600) + 24 + 230, y: max(f.anchor.y - 12 - 180, topInset + 190))
+        // 竖屏时纸窄：卡片别出右边
+        let right = visibleRect.maxX - 230 - 16
+        f.card.center = CGPoint(x: min(max(f.anchor.x, 600) + 24 + 230, right), y: max(f.anchor.y - 12 - 180, topInset + 190))
     }
 }
 
