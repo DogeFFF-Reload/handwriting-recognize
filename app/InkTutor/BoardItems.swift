@@ -4,10 +4,11 @@ import PencilKit
 import SceneUI
 import SwiftUI
 
-/// 双击笔身后在笔尖旁选的三种处理。
+/// 双击笔身后在笔尖旁选的处理。
 /// 「求解」把求导、积分、极限、求和、解方程合在一起：写的是什么就算什么（f'(x)、\int_0^2 f(x)dx、\lim…、\sum…、x^2-4=0）。
+/// 「矩阵」只在识别结果里真有矩阵时出现，点开是计算 / 求逆 / 求行列式。
 enum SegmentKind: String, CaseIterable, Identifiable {
-    case function, solve, geometry
+    case function, solve, geometry, matrix
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
         case .function: return "函数"
         case .solve: return "求解"
         case .geometry: return "几何"
+        case .matrix: return "矩阵"
         }
     }
 
@@ -24,6 +26,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
         case .function: return "收成标准式子并作图"
         case .solve: return "求导、积分、极限、求和、解方程，直接算出结果"
         case .geometry: return "收成动态几何"
+        case .matrix: return "计算、求逆矩阵、求行列式"
         }
     }
 
@@ -32,6 +35,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
         case .function: return .function
         case .solve: return .derivative   // 回放脚本里求导那几行记在 derivative 下
         case .geometry: return .geometry
+        case .matrix: return .function
         }
     }
 }
@@ -60,6 +64,15 @@ enum Selection: Equatable {
 struct SegmentMenuState: Equatable {
     var anchor: CGPoint
     var segment: InkSegment
+    /// 识别结果里有矩阵时才多一枚「矩阵」。
+    var offersMatrix = false
+    /// 「矩阵」的二级菜单展开着。
+    var matrixOpen = false
+    /// 双击时先认的一遍。有结果就复用，不再打第二次模型。
+    var recognized: RecognitionResult?
+    /// recognized 来自真识别器。回放不预认，免得行号被偷看一次。
+    var liveRecognition = false
+    var previewID = UUID()
 }
 
 /// 浮动卡片在画布上的位置、大小、旋转（像 PS 的自由变换）。

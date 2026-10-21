@@ -6,7 +6,11 @@ import Foundation
 
 /// 算出来的结果：左边是学生写的式子，右边是答案（App 里用绿色）。
 public struct Solution: Equatable {
-    public enum Operation: String, Equatable { case derivative, integral, limit, series, equation, evaluate }
+    public enum Operation: String, Equatable {
+        case derivative, integral, limit, series, equation, evaluate
+        /// 矩阵运算、逆矩阵、行列式。和「求解」共用一条结果，菜单上分开选。
+        case matrix, inverse, determinant
+    }
 
     /// 在被引用的函数图像上标出来的东西。
     public enum Hint: Equatable {

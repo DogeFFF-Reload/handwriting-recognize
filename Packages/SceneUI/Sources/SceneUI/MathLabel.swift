@@ -63,11 +63,13 @@ public struct MathLabel: UIViewRepresentable {
     }
 
     /// 识别器给的写法里有几样 SwiftMath 不认：\dfrac \tfrac \operatorname{…} \mathrm{…} 的函数名、\displaystyle、$。
+    /// 矩阵换行写成 `\\ `。这里若把其中的 `\ ` 换成 `\,`，下一行开头会画出一个逗号。
     public static func typesettable(_ latex: String) -> String {
-        var s = latex
-        for (a, b) in [("$", ""), ("\\displaystyle", ""), ("\\dfrac", "\\frac"), ("\\tfrac", "\\frac"), ("\\ ", "\\,")] {
+        var s = stripCommasInsideMatrices(latex)
+        for (a, b) in [("$", ""), ("\\displaystyle", ""), ("\\dfrac", "\\frac"), ("\\tfrac", "\\frac")] {
             s = s.replacingOccurrences(of: a, with: b)
         }
+        s = thinSpaces(s)
         let known = ["sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh",
                      "ln", "lg", "log", "exp"]
         while let r = s.range(of: #"\\(operatorname|mathrm)\{([a-z]+)\}"#, options: .regularExpression) {
@@ -75,6 +77,50 @@ public struct MathLabel: UIViewRepresentable {
             s.replaceSubrange(r, with: known.contains(inner) ? "\\" + inner + " " : (inner.count == 1 ? inner : "\\text{\(inner)}"))
         }
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// `\ ` 换成细间距 `\,`。`\\ ` 是矩阵换行，第二个反斜杠后面的空格不能动。
+    private static func thinSpaces(_ s: String) -> String {
+        let chars = Array(s)
+        var out = ""
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "\\", i + 1 < chars.count, chars[i + 1] == " ", i == 0 || chars[i - 1] != "\\" {
+                out.append("\\,")
+                i += 2
+                continue
+            }
+            out.append(chars[i])
+            i += 1
+        }
+        return out
+    }
+
+    /// 识别器常在矩阵里多写逗号，尤其是下一行开头。排版时去掉，不改矩阵外面的逗号。
+    private static func stripCommasInsideMatrices(_ s: String) -> String {
+        let envs = ["pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix", "smallmatrix", "matrix", "array"]
+        var out = ""
+        var i = s.startIndex
+        while i < s.endIndex {
+            guard s[i] == "\\" else {
+                out.append(s[i])
+                i = s.index(after: i)
+                continue
+            }
+            let matched = envs.first { env in s[i...].hasPrefix("\\begin{\(env)}") }
+            guard let env = matched,
+                  let bodyStart = s.index(i, offsetBy: "\\begin{\(env)}".count, limitedBy: s.endIndex),
+                  let end = s.range(of: "\\end{\(env)}", range: bodyStart..<s.endIndex) else {
+                out.append(s[i])
+                i = s.index(after: i)
+                continue
+            }
+            out.append(contentsOf: s[i..<bodyStart])
+            out.append(contentsOf: s[bodyStart..<end.lowerBound].filter { $0 != "," })
+            out.append(contentsOf: s[end])
+            i = end.upperBound
+        }
+        return out
     }
 
     private static func configure(_ v: MTMathUILabel, latex: String, fontSize: CGFloat, color: UIColor, mode: MTMathUILabelMode) {

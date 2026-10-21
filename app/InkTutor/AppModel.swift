@@ -12,6 +12,7 @@ import SwiftUI
 /// 「求解」把写下的式子直接算出来：在函数下面写 f'(x) 求导（图像里画出导函数），写 \int_0^2 f(x)dx、
 /// \lim_{x\to 3} f(x)、\sum_{k=1}^{n} k^2、x^2-4=0，或者一个不引用函数的完整式子，都直接给出结果；
 /// 积分和极限顺便标在 f 的图像上。选「函数」时写的其实是要算的东西，也会转去求解。
+/// 双击的同时先认一遍：结果里有矩阵，菜单再加一枚「矩阵」，点开是计算、求逆矩阵、求行列式。
 /// 几何沿用 P3 的草图识别，触发方式统一成双击后选。
 ///
 /// 所有回调都在主线程：PencilKit 回调、Pencil 双击、识别结果用 MainActor 切回来。
@@ -112,8 +113,29 @@ final class AppModel {
             return
         }
         let tip = point ?? lastPenPoint(in: segment) ?? CGPoint(x: segment.bounds.maxX, y: segment.bounds.midY)
+        let state = SegmentMenuState(anchor: tip, segment: segment)
+        let token = state.previewID
         withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-            menu = SegmentMenuState(anchor: tip, segment: segment)
+            menu = state
+        }
+        previewMatrix(segment, token: token)
+    }
+
+    /// 菜单先出来，识别在后面赶。认成矩阵才把「矩阵」加进去；认成别的也留着，选函数 / 求解时不用再打一次模型。
+    private func previewMatrix(_ seg: InkSegment, token: UUID) {
+        let pk = seg.strokeIDs.compactMap { pkByID[$0] }
+        guard let recognizer = Self.makePreviewRecognizer(strokes: pk) else { return }
+        let line = makeLine("preview", revision: 0, mode: .function, seg)
+        let png = PencilKitBridge.png(of: line, in: drawing, ids: &ids)
+        Task { @MainActor [weak self] in
+            guard let r = try? await recognizer.recognize(line: line, imagePNG: png) else { return }
+            guard var menu = self?.menu, menu.previewID == token else { return }
+            let latex = r.latex.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !latex.isEmpty else { return }
+            menu.recognized = r
+            menu.liveRecognition = true
+            menu.offersMatrix = MatrixMath.contains(latex)
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.75)) { self?.menu = menu }
         }
     }
 
@@ -168,9 +190,14 @@ final class AppModel {
         strokes.filter { segment.strokeIDs.contains($0.id) }.max { $0.createdAt < $1.createdAt }?.points.last
     }
 
-    /// 菜单里选了一项。
+    /// 菜单里选了一项。「矩阵」不收菜单，只展开二级菜单。
     func choose(_ kind: SegmentKind) {
-        guard let m = menu else { return }
+        guard var m = menu else { return }
+        if kind == .matrix {
+            m.matrixOpen.toggle()
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) { menu = m }
+            return
+        }
         withAnimation(.easeOut(duration: 0.15)) { menu = nil }
         let seg = m.segment
         guard !busy.contains(where: { $0.bounds.intersects(seg.bounds) }) else {
@@ -180,9 +207,31 @@ final class AppModel {
         // 还原了笔迹的式子改成画几何：原来那一项不要了（笔迹留着）
         if kind == .geometry, let t = seg.targetID, let f = functions.first(where: { $0.id == t }) { delete(f, keepInk: true) }
         switch kind {
-        case .function, .solve: recognizeMath(seg, kind)
-        case .geometry: buildGeometry(seg)
+        case .function, .solve:
+            let latex = m.recognized?.latex.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if m.liveRecognition, let r = m.recognized, !latex.isEmpty {
+                finishFromRecognition(seg, result: r, kind: kind)
+            } else {
+                recognizeMath(seg, kind)
+            }
+        case .geometry:
+            buildGeometry(seg)
+        case .matrix:
+            break
         }
+    }
+
+    /// 矩阵的二级菜单：计算、求逆、求行列式。识别结果双击时已经有了。
+    func chooseMatrix(_ action: MatrixAction) {
+        guard let m = menu else { return }
+        let latex = m.recognized?.latex.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        withAnimation(.easeOut(duration: 0.15)) { menu = nil }
+        let below = CGPoint(x: m.segment.bounds.midX, y: m.segment.bounds.maxY + 24)
+        guard let r = m.recognized, MatrixMath.contains(latex) else {
+            toast("没认出矩阵", at: below, .warning)
+            return
+        }
+        finishMatrix(m.segment, latex: latex, result: r, action: action)
     }
 
     // MARK: 函数
@@ -222,6 +271,11 @@ final class AppModel {
         let latex = r.latex.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !latex.isEmpty else {
             toast("没认出来：写清楚一点再双击", at: below, .warning)
+            return
+        }
+        if MatrixMath.contains(latex) {
+            // 选了函数或求解，但这是矩阵：把菜单拉回来，让人选计算 / 求逆 / 求行列式
+            reopenMatrixMenu(seg, result: r)
             return
         }
         if let request = DerivativeRequest.parse(latex) {
@@ -336,6 +390,16 @@ final class AppModel {
             }
             return
         }
+        if MatrixMath.contains(tex) {
+            let action = item.solution.flatMap { MatrixMath.action(for: $0.operation) } ?? .calculate
+            guard let target = item.solveSource != nil ? item : convertToComputed(item) else { return }
+            withAnimation(.easeOut(duration: 0.2)) {
+                target.solveSource = tex
+                target.engine = "手动"
+                setSolution(target, .success(MatrixMath.solve(tex, action: action)))
+            }
+            return
+        }
         // 求解那一行改了，或者把一条函数改成了要算的式子：重新算
         let table = functionTable(excluding: item.id)
         if item.solveSource != nil || Solver.looksLikeComputation(tex, functions: table) {
@@ -370,7 +434,8 @@ final class AppModel {
         setDrawing(d)
         item.inkIDs = item.inkSourceIDs
         withAnimation(.easeOut(duration: 0.2)) { item.showingInk = true }
-        toast("改完后双击笔身，选「\(item.isComputed ? "求解" : "函数")」重新识别",
+        let again = item.solution.flatMap { MatrixMath.action(for: $0.operation) } != nil ? "矩阵" : (item.isComputed ? "求解" : "函数")
+        toast("改完后双击笔身，选「\(again)」重新识别",
               at: CGPoint(x: item.frame.midX, y: item.frame.maxY + 26), .info)
     }
 
@@ -545,6 +610,58 @@ final class AppModel {
         return true
     }
 
+    /// 矩阵菜单算完：手写换成标准式子，结果是绿的。没有逆、不是方阵，写在式子下面。
+    private func finishMatrix(_ seg: InkSegment, latex: String, result r: RecognitionResult, action: MatrixAction) {
+        let target = functions.first { $0.id == seg.targetID }
+        let lineID = target?.lineID ?? nextLineID("M")
+        let revision = (target?.revision ?? 0) + 1
+        let below = CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24)
+        if let target, !target.isComputed {
+            if !dependents(of: target).isEmpty {
+                toast("下面还有用到 \(target.name)(x) 的式子，先删掉它们再改", at: below, .warning)
+                return
+            }
+            delete(target, keepInk: true)
+        }
+        if let target, target.derivedFrom != nil { delete(target, keepInk: true) }
+        let reuse = target?.solveSource != nil ? target : nil
+        let fontSize = min(max(seg.bounds.height * 0.55, 22), 48)
+        let item = reuse ?? FunctionItem(lineID: lineID, latex: latex, origin: .zero, fontSize: fontSize, size: .zero,
+                                         card: CardFrame(center: .zero, size: .zero, minimized: true), tint: Theme.ok)
+        item.revision = revision
+        item.fontSize = fontSize
+        item.engine = r.engine
+        item.ms = r.ms
+        item.solveSource = latex
+        setSolution(item, .success(MatrixMath.solve(latex, action: action)))
+        item.origin = CGPoint(x: seg.bounds.minX, y: seg.bounds.midY - item.size.height / 2)
+        replaceInk(seg, ink: seg.strokeIDs.compactMap { pkByID[$0] }, with: item, isNew: reuse == nil)
+    }
+
+    /// 预识别已经有了，选函数 / 求解时直接用，同时把回放行号补上（预识别本身不记账）。
+    private func finishFromRecognition(_ seg: InkSegment, result r: RecognitionResult, kind: SegmentKind) {
+        let target = functions.first { $0.id == seg.targetID }
+        let lineID = target?.lineID ?? nextLineID(kind == .solve ? "D" : "F")
+        let revision = (target?.revision ?? 0) + 1
+        target?.revision = revision
+        let line = makeLine(lineID, revision: revision, mode: kind.mode, seg)
+        let position = Self.replayTracker.observe(lineID: line.id, mode: line.mode, strokeIDs: line.strokes.map(\.id))
+        if UserDefaults.standard.bool(forKey: "recordReplay") {
+            Self.replayRecorder.record(position, latex: r.latex)
+        }
+        let ink = seg.strokeIDs.compactMap { pkByID[$0] }
+        finishFunction(seg, result: r, target: target, lineID: lineID, revision: revision, ink: ink, kind: kind)
+    }
+
+    private func reopenMatrixMenu(_ seg: InkSegment, result: RecognitionResult) {
+        var state = SegmentMenuState(anchor: CGPoint(x: seg.bounds.maxX, y: seg.bounds.midY), segment: seg)
+        state.offersMatrix = true
+        state.matrixOpen = true
+        state.recognized = result
+        state.liveRecognition = true
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) { menu = state }
+    }
+
     /// 把算出来的结果写进这一项，图像上的标注跟着换。
     private func setSolution(_ item: FunctionItem, _ outcome: Result<Solution, Error>) {
         item.derivedFrom = nil
@@ -592,6 +709,11 @@ final class AppModel {
     private func recomputeSolutions(using name: String?) {
         for item in functions where item.solveSource != nil {
             guard let src = item.solveSource else { continue }
+            if MatrixMath.contains(src) {
+                let action = item.solution.flatMap { MatrixMath.action(for: $0.operation) } ?? .calculate
+                setSolution(item, .success(MatrixMath.solve(src, action: action)))
+                continue
+            }
             let uses = name.map { item.solution?.references.contains($0) ?? false } ?? true
             guard uses || item.solution == nil || item.solution?.result == nil else { continue }
             let table = functionTable(excluding: item.id)
@@ -669,6 +791,9 @@ final class AppModel {
         case .series: return "求和"
         case .equation: return "解方程"
         case .evaluate: return "计算"
+        case .matrix: return "矩阵运算"
+        case .inverse: return "逆矩阵"
+        case .determinant: return "行列式"
         }
     }
 
@@ -812,6 +937,23 @@ final class AppModel {
 
     /// 识别链：MyScript（设备上）→ 百炼 → Server；都没有时用回放（断网演示）。
     static func makeRecognizer(strokes: [PKStroke]) -> InkRecognizer {
+        let chain = recognizerChain(strokes: strokes)
+        guard !chain.isEmpty else {
+            return ReplayRecognizer(script: ReplayScript.golden.overlaid(with: replayRecorder.script), tracker: replayTracker,
+                                    wholeLine: true)
+        }
+        // 真识别也让回放的行状态跟着走，中途切到回放不会数错；设置里打开「录制回放」时顺便录下来。
+        let record = UserDefaults.standard.bool(forKey: "recordReplay")
+        return TrackingRecognizer(FallbackRecognizer(chain), tracker: replayTracker, recorder: record ? replayRecorder : nil)
+    }
+
+    /// 双击时先认一遍，好决定要不要加「矩阵」。不走回放记账：空链（只有回放）时不预认。
+    static func makePreviewRecognizer(strokes: [PKStroke]) -> InkRecognizer? {
+        let chain = recognizerChain(strokes: strokes)
+        return chain.isEmpty ? nil : FallbackRecognizer(chain)
+    }
+
+    private static func recognizerChain(strokes: [PKStroke]) -> [InkRecognizer] {
         let d = UserDefaults.standard
         let pref = d.string(forKey: "engine") ?? "auto"
         let key = (d.string(forKey: "dashscopeKey") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -830,13 +972,7 @@ final class AppModel {
         }
         // 指定的引擎没配好（比如选了直连百炼却没填 Key）：按自动的顺序来，不直接退到回放
         if chain.isEmpty, pref != "replay" { chain = [myscript, qwen, mac].compactMap { $0 } }
-        guard !chain.isEmpty else {
-            return ReplayRecognizer(script: ReplayScript.golden.overlaid(with: replayRecorder.script), tracker: replayTracker,
-                                    wholeLine: true)
-        }
-        // 真识别也让回放的行状态跟着走，中途切到回放不会数错；设置里打开「录制回放」时顺便录下来。
-        return TrackingRecognizer(FallbackRecognizer(chain), tracker: replayTracker,
-                                  recorder: d.bool(forKey: "recordReplay") ? replayRecorder : nil)
+        return chain
     }
 
     /// 工具栏上显示的当前引擎。
