@@ -71,7 +71,7 @@ jobs:
           mkdir -p shots
           for look in light dark; do
             xcrun simctl ui "$DEV" appearance $look
-            for s in menu card reveal solve check checked shapes solids clean scrolled gallery compact transform compare; do
+            for s in menu card reveal solve check checked shapes solids clean scrolled gallery compact transform compare recognize settings; do
               xcrun simctl launch --terminate-running-process "$DEV" dev.handwriting.inktutor -demo $s
               sleep 7
               xcrun simctl io "$DEV" screenshot "shots/$s-$look.png"

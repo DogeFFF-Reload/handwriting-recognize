@@ -600,8 +600,11 @@ private struct ToastView: View {
     }
 }
 
-/// 画板还是空的时候：一句怎么开始。
+/// 画板还是空的时候：一句怎么开始。工具栏上有「识别」键时（没认出 Pencil Pro）顺便提它。
 struct EmptyBoardHint: View {
+    @AppStorage(PencilProbe.buttonKey) private var buttonChoice: Bool?
+    @AppStorage(PencilProbe.evidenceKey) private var pencilEvidence = 0
+
     var body: some View {
         VStack(spacing: 14) {
             Text("写一个函数，比如")
@@ -610,7 +613,7 @@ struct EmptyBoardHint: View {
             MathLabel("f(x)=x^{3}-5x", fontSize: 34, color: .tertiaryLabel, style: .display)
                 .fixedSize()
             HStack(spacing: 18) {
-                hint("hand.tap", "写完双击笔身")
+                hint("hand.tap", PencilProbe.showsButton(choice: buttonChoice, evidence: pencilEvidence) ? "写完双击笔身或点「识别」" : "写完双击笔身")
                 hint("circle.grid.cross", "在笔尖旁选「函数」")
                 hint("hand.pinch", "捏一下切换橡皮")
             }

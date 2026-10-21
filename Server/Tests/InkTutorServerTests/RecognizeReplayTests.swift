@@ -70,4 +70,22 @@ final class RecognizeReplayTests: XCTestCase {
         XCTAssertEqual(slow.0, "f'(x)=3x^2", "写到 3x^2- 时只有 1 项，不会提前批改")
         XCTAssertTrue(slow.1)
     }
+
+    /// 百炼那一路用的 Vapor client 底下是 EventLoopFuture，不理会取消：到点也要放回放，不能等它自己的 20 秒超时
+    /// （App 那边 15 秒就放弃了，等不到回放）。
+    func testFallbackDoesNotWaitForALiveCallThatIgnoresCancellation() async throws {
+        let replay = RecognizeReplay(mode: .fallback, directory: tempDir())
+        var up = upload("F1", .function, (1...16).map { "s\($0)" })
+        up.trigger = .doubleTap
+        let t0 = Date()
+        let r = try await recognizeWithReplay(replay, upload: up, timeout: 0.2) {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) { c.resume() }
+            }
+            return "too late"
+        }
+        XCTAssertEqual(r.0, "f(x)=x^3-5x")
+        XCTAssertTrue(r.1)
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 2, "不该等到真识别 3 秒后回来")
+    }
 }

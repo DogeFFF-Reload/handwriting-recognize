@@ -3,7 +3,7 @@ import PencilKit
 import SwiftUI
 
 /// 整块画板的 PencilKit 画布。不显示 PKToolPicker；笔 / 橡皮由工具栏和 Pencil Pro 捏一下切换；
-/// Pencil 双击由 App 接管：这一段写完了，在笔尖旁弹出「函数 / 求解 / 几何」（D2）。
+/// Pencil 双击由 App 接管：这一段写完了，在笔尖旁弹出「函数 / 求解 / 检查 / 几何」（D2）。
 /// 纸可以上下、左右滚（没开手指书写时一根手指拖，开了是两根手指），两根手指捏合缩放（0.5–3 倍）。
 /// 上下、左右都是无边界的：滚到靠近底边或右边，纸再接一屏。
 /// 笔迹存在画布坐标里，缩放不改它；UIScrollView 的 contentSize、contentOffset 是放大后的屏幕 point。
@@ -44,6 +44,14 @@ struct PencilCanvas: UIViewRepresentable {
         tap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
         tap.cancelsTouchesInView = false
         canvas.addGestureRecognizer(tap)
+        // Pencil 落笔时顺便看看是哪种笔（PencilProbe），不影响书写
+        let probe = PencilTouchProbe(target: nil, action: nil)
+        probe.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        probe.cancelsTouchesInView = false
+        probe.delaysTouchesBegan = false
+        probe.delaysTouchesEnded = false
+        probe.onPencil = { [weak coordinator = context.coordinator] rolled in coordinator?.notice(rolled ? .pro : .pencil) }
+        canvas.addGestureRecognizer(probe)
         app.attach(canvas)
         return canvas
     }
@@ -116,6 +124,7 @@ struct PencilCanvas: UIViewRepresentable {
 
         // iPadOS 17.5+：双击 = 这一段写完了。不执行系统的「切到橡皮」。
         func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
+            notice(.doubleTap)
             // 落点在画布视图（UIScrollView）的坐标里，放大过：除回画布坐标
             let zoom = (interaction.view as? UIScrollView)?.zoomScale ?? 1
             let point = tap.hoverPose.map { CGPoint(x: $0.location.x / zoom, y: $0.location.y / zoom) }
@@ -133,8 +142,17 @@ struct PencilCanvas: UIViewRepresentable {
 
         // Pencil Pro 捏一下 = 切换笔 / 橡皮
         func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
+            notice(.pro)
             guard squeeze.phase == .ended else { return }
             app.eraserOn.toggle()
+        }
+
+        /// 双击、捏压、Pencil 落笔时记下用的是哪种笔（PencilProbe），工具栏的「识别」键默认显不显示按它定。
+        /// 刚认出 Pencil Pro、用户又没自己拨过开关时，「识别」键会收起来：说一声去哪找。
+        func notice(_ evidence: PencilProbe.Evidence) {
+            guard PencilProbe.note(evidence), evidence == .pro, PencilProbe.choice == nil else { return }
+            let v = app.visibleRect
+            app.toast("认出 Pencil Pro，「识别」收进了设置键", at: CGPoint(x: v.midX, y: v.minY + app.topInsetOnPaper + 30 / app.zoom), .info)
         }
 
         private func keepAppTool(on view: UIView?) {

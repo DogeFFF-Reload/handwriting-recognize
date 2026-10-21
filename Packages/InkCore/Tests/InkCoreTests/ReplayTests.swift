@@ -140,6 +140,31 @@ final class ReplayTests: XCTestCase {
         XCTAssertEqual(third.last, "f(x)=x^3-5x")
     }
 
+    /// App 的行状态全局只有一份，每份草稿的行号（F1）和笔画 id（s1…）却都从头数：打开草稿时要 reset
+    /// （AppModel.restore 调 resetReplay），不然新草稿的 F1 被当成又擦了一轮，直接放改正以后的式子。
+    func testNewDraftReusingLineAndStrokeIDsNeedsAReset() async throws {
+        let tracker = ReplayTracker()
+        let replay = ReplayRecognizer(tracker: tracker, wholeLine: true)
+        func confirm(_ ids: [String]) async throws -> String {
+            let strokes = ids.map { InkStroke(id: $0, bounds: .zero, createdAt: Date()) }
+            let line = InkLine(id: "F1", revision: 1, mode: .function, band: .zero, strokes: strokes, removedStrokeIDs: [])
+            return try await replay.recognize(line: line, imagePNG: nil).latex
+        }
+        // 第一份草稿（彩排）：写 f(x)=x^3-5x，擦掉 5 写 3
+        let first = (1...16).map { "s\($0)" }
+        let written = try await confirm(first)
+        let fixed = try await confirm(first.filter { $0 != "s13" && $0 != "s14" } + ["s17"])
+        XCTAssertEqual([written, fixed], ["f(x)=x^3-5x", "f(x)=x^3-3x"])
+
+        // 新草稿：id 又从 s1 数，这次写了 15 笔
+        let second = (1...15).map { "s\($0)" }
+        let stale = try await confirm(second)
+        XCTAssertEqual(stale, "f(x)=x^3-3x", "不 reset：当成擦了一轮，放的是改正以后的")
+        tracker.reset()
+        let fresh = try await confirm(second)
+        XCTAssertEqual(fresh, "f(x)=x^3-5x")
+    }
+
     func testTrackerOrdinalsAndEraseRounds() {
         let t = ReplayTracker()
         XCTAssertEqual(t.observe(lineID: "L1", mode: .function, strokeIDs: ["a", "b", "c"]),

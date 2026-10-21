@@ -54,7 +54,7 @@ public struct DashScopeRecognizer: InkRecognizer {
             do {
                 let text = try await DashScope.chat(apiKey: apiKey, endpoint: endpoint, session: session, model: model,
                                                     imagePNG: png, prompt: recognitionPrompt, maxTokens: 200, temperature: 0)
-                let latex = try extractLatex(fromModelReply: text)
+                let latex = canonicalLatex(try extractLatex(fromModelReply: text))
                 return RecognitionResult(lineID: line.id, revision: line.revision, latex: latex, engine: model,
                                          ms: Int(Date().timeIntervalSince(t0) * 1000))
             } catch {

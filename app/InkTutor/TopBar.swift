@@ -2,8 +2,9 @@ import SwiftUI
 
 /// 顶上只放笔的状态和功能键，三枚浮在纸上的胶囊：
 /// 最左边回草稿画廊、草稿的名字（点一下改名）；然后是笔（笔 / 橡皮、颜色、粗细）；
-/// 右边是撤销、重做、「完成一段」、清空、识别引擎、设置。
-/// 模式不再在这里选：写完一段双击笔身，在笔尖旁选。
+/// 右边是撤销、重做、「识别」、清空、识别引擎、设置。
+/// 模式不再在这里选：写完一段双击笔身（或点「识别」），在笔尖旁选。
+/// 「识别」键默认只在没认出 Pencil Pro 时显示（PencilProbe），设置里可以改；不显示时它在设置键的菜单里。
 struct TopBar: View {
     @Bindable var app: AppModel
     var engine: String
@@ -15,6 +16,12 @@ struct TopBar: View {
     var onRename: (() -> Void)?
     var onSettings: () -> Void
     @State private var confirmClear = false
+    @AppStorage(PencilProbe.buttonKey) private var buttonChoice: Bool?
+    @AppStorage(PencilProbe.evidenceKey) private var pencilEvidence = 0
+
+    private var showsRecognize: Bool {
+        PencilProbe.showsButton(choice: buttonChoice, evidence: pencilEvidence)
+    }
 
     var body: some View {
         if app.compact {
@@ -40,7 +47,7 @@ struct TopBar: View {
         title.count > 14 ? String(title.prefix(13)) + "…" : title
     }
 
-    // MARK: 窗口化：只留笔、橡皮、清空、设置
+    // MARK: 窗口化：只留笔、橡皮、识别、清空、设置
 
     private var compactGroup: some View {
         HStack(spacing: 2) {
@@ -51,6 +58,10 @@ struct TopBar: View {
                 withAnimation(.snappy(duration: 0.2)) { app.eraserOn = true }
             }
             Rectangle().fill(Theme.hairline).frame(width: 1, height: 18).padding(.horizontal, 3)
+            if showsRecognize {
+                RecognizeButton(app: app, small: true)
+                    .padding(.trailing, 2)
+            }
             SmallToolButton(systemImage: "trash", help: "清空", selected: false) { confirmClear = true }
                 .disabled(!(app.hasInk || !app.functions.isEmpty || !app.geometries.isEmpty || !app.shapes.isEmpty))
                 .confirmationDialog("清空整页？", isPresented: $confirmClear, titleVisibility: .visible) {
@@ -67,7 +78,7 @@ struct TopBar: View {
         .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
     }
 
-    /// 设置键：收进去的那些（草稿列表、撤销重做、完成一段、颜色粗细）都在这个菜单里。
+    /// 设置键：收进去的那些（草稿列表、撤销重做、颜色粗细，「识别」键不显示时还有识别）都在这个菜单里。
     private var moreMenu: some View {
         Menu {
             Section(shortTitle) {
@@ -81,8 +92,7 @@ struct TopBar: View {
                     .disabled(!app.canUndo)
                 Button { app.redo() } label: { Label("重做", systemImage: "arrow.uturn.forward") }
                     .disabled(!app.canRedo)
-                Button { app.confirmLatestSegment() } label: { Label("完成一段", systemImage: "hand.tap") }
-                    .disabled(!app.hasInk)
+                if !showsRecognize { recognizeMenuItem }
             }
             Section {
                 Picker(selection: Binding(get: { app.penColor }, set: { app.penColor = $0; app.eraserOn = false })) {
@@ -110,6 +120,31 @@ struct TopBar: View {
         .menuOrder(.fixed)
         .foregroundStyle(Color.primary)
         .accessibilityLabel("设置和更多")
+    }
+
+    /// 「识别」键不显示时，设置键菜单里的同一个功能。
+    private var recognizeMenuItem: some View {
+        Button { app.confirmLatestSegment() } label: { Label("识别", systemImage: RecognizeButton.icon) }
+            .disabled(!app.hasInk)
+    }
+
+    /// 全屏时「识别」键不显示（认出了 Pencil Pro，或者在设置里关了）：设置键换成菜单，识别收在里面，免得双击不灵时没处点。
+    private var settingsMenu: some View {
+        Menu {
+            recognizeMenuItem
+            Section {
+                Button(action: onSettings) { Label("设置…", systemImage: "gearshape") }
+            }
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 16, weight: .semibold))
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
+        }
+        .menuOrder(.fixed)
+        .foregroundStyle(Color.primary)
+        .hoverEffect(.highlight)
+        .accessibilityLabel("识别和设置")
     }
 
     // MARK: 草稿
@@ -221,21 +256,10 @@ struct TopBar: View {
         HStack(spacing: 4) {
             IconButton(systemImage: "arrow.uturn.backward", help: "撤销", enabled: app.canUndo) { app.undo() }
             IconButton(systemImage: "arrow.uturn.forward", help: "重做", enabled: app.canRedo) { app.redo() }
-            divider
-            Button {
-                app.confirmLatestSegment()
-            } label: {
-                Label("完成一段", systemImage: "hand.tap")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 12)
-                    .frame(height: 36)
-                    .background(Theme.accent.opacity(0.12), in: Capsule())
-                    .foregroundStyle(Theme.accent)
+            if showsRecognize {
+                divider
+                RecognizeButton(app: app)
             }
-            .buttonStyle(.plain)
-            .hoverEffect(.highlight)
-            .disabled(!app.hasInk)
-            .accessibilityHint("Pencil 双击没反应时用它：在最后一笔旁弹出函数 / 求解 / 几何，认出矩阵时还有矩阵")
             divider
             IconButton(systemImage: "trash", help: "清空", enabled: app.hasInk || !app.functions.isEmpty || !app.geometries.isEmpty || !app.shapes.isEmpty) {
                 confirmClear = true
@@ -246,7 +270,11 @@ struct TopBar: View {
                 Text("笔迹、式子和卡片都会去掉，回放从第一行重新数。")
             }
             EngineBadge(engine: engine)
-            IconButton(systemImage: "gearshape", help: "设置", action: onSettings)
+            if showsRecognize {
+                IconButton(systemImage: "gearshape", help: "设置", action: onSettings)
+            } else {
+                settingsMenu
+            }
         }
         .padding(.horizontal, 6)
         .frame(height: 52)
@@ -257,6 +285,45 @@ struct TopBar: View {
 
     private var divider: some View {
         Rectangle().fill(Theme.hairline).frame(width: 1, height: 24).padding(.horizontal, 4)
+    }
+}
+
+/// 「识别」：和 Pencil 双击一样，在最近写的那一段旁边（最后一笔收笔的地方）弹出函数 / 求解 / 检查 / 几何，认出矩阵时还有矩阵；
+/// 菜单开着时再点一下收起。实心的强调色，比别的功能键醒目：一代、USB-C Pencil 和手指没有双击，打开菜单全靠它。
+private struct RecognizeButton: View {
+    static let icon = "text.viewfinder"
+    var app: AppModel
+    /// 窗口化时的小胶囊里小一号。
+    var small = false
+
+    var body: some View {
+        Button {
+            app.confirmLatestSegment()
+        } label: {
+            Label("识别", systemImage: Self.icon)
+                .font(small ? Font.system(size: 13, weight: .semibold) : Font.subheadline.weight(.semibold))
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, small ? 10 : 14)
+                .frame(height: small ? 30 : 36)
+                .background(Theme.accent, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(ProminentPressStyle())
+        .hoverEffect(.highlight)
+        .disabled(!app.hasInk)
+        .accessibilityHint("和 Pencil 双击一样：在最近写的那一段旁边弹出函数 / 求解 / 检查 / 几何，认出矩阵时还有矩阵；再点一次收起")
+    }
+}
+
+/// 实心按键：按下时淡一点、缩一点；没有笔迹（不能点）时整个变淡。
+private struct ProminentPressStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.4)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 

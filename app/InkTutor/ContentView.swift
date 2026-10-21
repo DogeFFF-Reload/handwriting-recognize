@@ -118,6 +118,7 @@ struct BoardScreen: View {
             if let demo {
                 try? await Task.sleep(nanoseconds: 200_000_000)
                 app.loadDemo(demo)
+                if demo == "settings" { showSettings = true }
                 return
             }
             guard let meta else { return }
@@ -277,11 +278,49 @@ struct SettingsView: View {
     @AppStorage("serverURL") private var server = ""
     @AppStorage("allowFinger") private var allowFinger = false
     @AppStorage("recordReplay") private var recordReplay = false
+    @AppStorage(PencilProbe.buttonKey) private var buttonChoice: Bool?
+    @AppStorage(PencilProbe.evidenceKey) private var pencilEvidence = 0
+    @State private var confirmHideButton = false
     @Environment(\.dismiss) private var dismiss
+
+    private var pencil: PencilProbe.Evidence { PencilProbe.Evidence(rawValue: pencilEvidence) ?? .unknown }
+
+    /// 「显示识别按键」：显示的是现在实际的样子（没拨过时按检测结果）；拨一下就记成用户的选择，以后不再跟着检测变。
+    /// 还没认出 Pencil Pro 时关掉，先问一句。
+    private var showsButton: Binding<Bool> {
+        Binding(get: {
+            PencilProbe.showsButton(choice: buttonChoice, evidence: pencilEvidence)
+        }, set: { on in
+            if !on, pencil < .pro {
+                confirmHideButton = true
+            } else {
+                buttonChoice = on
+            }
+        })
+    }
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Toggle("显示识别按键", isOn: showsButton)
+                    LabeledContent("检测到的笔") {
+                        Text(pencil.summary)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Button("重新检测（开关回到自动）") {
+                        pencilEvidence = PencilProbe.Evidence.unknown.rawValue
+                        buttonChoice = nil
+                    }
+                    .disabled(pencil == .unknown && buttonChoice == nil)
+                } header: {
+                    Text("识别按键")
+                } footer: {
+                    Text("「识别」和 Pencil 双击一样，在最近写的那一段旁边弹出函数 / 求解 / 检查 / 几何；不显示时它在设置键（齿轮）的菜单里。"
+                         + "没拨过开关时，认出 Pencil Pro 就不显示，否则显示；拨过就按你的。"
+                         + "iPadOS 查不到配对的是哪支 Pencil，只能推断：捏过一下或笔画带滚转角才算 Pro，刚装好、还没用 Pencil 写过时当作不是。")
+                }
                 Section {
                     Picker("识别引擎", selection: $engine) {
                         Text("自动（MyScript 优先）").tag("auto")
@@ -329,11 +368,18 @@ struct SettingsView: View {
                 Section {
                     Toggle("允许手指书写（没有 Pencil 时测试用）", isOn: $allowFinger)
                 } footer: {
-                    Text("Pencil 双击 = 这一段写完了；Pencil Pro 捏一下 = 切换笔和橡皮。双击没反应时点工具栏上的「完成一段」。")
+                    Text("Pencil 双击 = 这一段写完了；Pencil Pro 捏一下 = 切换笔和橡皮。不能双击（一代、USB-C Pencil、手指）或双击没反应时，点工具栏上的「识别」。")
                 }
             }
             .navigationTitle("设置")
             .toolbar { Button("完成") { dismiss() } }
+            .alert("关掉识别按键？", isPresented: $confirmHideButton) {
+                Button("关掉", role: .destructive) { buttonChoice = false }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("还没认出 Pencil Pro。一代、USB-C Pencil 和手指不能双击，关掉后只能从工具栏设置键（齿轮）的菜单里点「识别」；"
+                     + "二代 Pencil 和 Pencil Pro 双击笔身也行。以后可以在这里重新打开。")
+            }
         }
     }
 }

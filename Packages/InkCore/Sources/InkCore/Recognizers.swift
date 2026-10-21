@@ -19,28 +19,81 @@ public enum RecognizerError: Error, Equatable {
 
 /// 识别提示词。2026-10-19 实测：qwen3.8-flash / qwen3.8-max / qwen3-vl-plus 在这句提示下
 /// 都会照抄学生写错的式子（3x^2-3x 不会被「改对」），单行约 1–2 秒。不要往里加题目上下文。
+/// 2026-10-21 加了写法约定：只说「照抄」时，qwen3.8-flash 会把极限写成 \rightarrow、\operatorname*{lim}，
+/// 矩阵写成 \left(\begin{array}…\right)；加约定后 21 条求解样本（积分、极限、求和、矩阵、方程，含两条故意写错的）
+/// 连跑两遍全对，写错的仍照抄。脚本见 tools/recog-bench/solve_bench.py。
 public let recognitionPrompt = """
 你是手写数学识别器，只负责逐字照抄，不做任何数学判断。
-图片是学生在平板上手写的一行数学式子，里面可能有计算错误。必须按学生实际写的内容原样转写：
-绝对不要改正、补全、化简或调整项的顺序；看不清的字按最像的字写。
-只输出一个 JSON 对象：{"latex": "这行的 LaTeX"}
+图片是学生在平板上手写的一段数学式子（可能是函数、求导、积分、极限、求和、方程或矩阵），里面可能有计算错误。必须按学生实际写的内容原样转写：
+绝对不要改正、补全、化简、求值或调整项的顺序；看不清的字按最像的字写。
+LaTeX 写法统一成这样：
+- 极限 \\lim_{x \\to 0}，趋向写 \\to，单侧写 0^{+}、0^{-}；不要用 \\operatorname、\\rightarrow
+- 积分 \\int_{0}^{1} x^{2} dx，不定积分 \\int x e^{x} dx；求和 \\sum_{k=1}^{n}，连乘 \\prod_{k=1}^{5}；上下限、指数都用花括号
+- 分式 \\frac{a}{b}，求导 f'(x) 或 \\frac{d}{dx}
+- 矩阵用 \\begin{pmatrix}1 & 2 \\\\ 3 & 4\\end{pmatrix}；方括号用 bmatrix，竖线（行列式）用 vmatrix；不要用 array 和 \\left( \\right)；数字不要加花括号
+- 不要用 \\displaystyle、\\mathrm、$
+只输出一个 JSON 对象：{"latex": "这段的 LaTeX"}
 图里没有字或只是涂改的痕迹，就输出 {"latex": ""}。
 """
 
-/// 按顺序试几个识别器：前一个抛错或给了空结果就换下一个，最后一个的空结果照样返回（界面说「没认出来」）。
+/// 模型偶尔不按约定写（换了后备模型、提示词没压住）时的兜底：把几种常见的「另一种写法」改成 App 认的写法。
+/// 只改写法，不改内容：\operatorname*{lim} → \lim，\rightarrow → \to，
+/// \left( \begin{array}{cc} … \end{array} \right) → pmatrix（[ ] → bmatrix，| | → vmatrix），矩阵格子里的 { 1 } → 1。
+public func canonicalLatex(_ latex: String) -> String {
+    var s = latex.replacingOccurrences(of: "\\displaystyle", with: "").replacingOccurrences(of: "$", with: "")
+    for pattern in [#"\\operatorname\*?\s*\{\s*lim\s*\}"#, #"\\mathrm\s*\{\s*lim\s*\}"#] {
+        s = s.replacingOccurrences(of: pattern, with: "\\\\lim", options: .regularExpression)
+    }
+    s = s.replacingOccurrences(of: #"\\(long)?rightarrow"#, with: "\\\\to", options: .regularExpression)
+
+    let envs: [(open: String, close: String, env: String)] = [("(", ")", "pmatrix"), ("[", "]", "bmatrix"), ("|", "|", "vmatrix")]
+    for e in envs {
+        let o = NSRegularExpression.escapedPattern(for: e.open), c = NSRegularExpression.escapedPattern(for: e.close)
+        let pattern = #"\\left\s*"# + o + #"\s*\\begin\{array\}\s*\{[^{}]*\}(.*?)\\end\{array\}\s*\\right\s*"# + c
+        guard let re = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { continue }
+        while let m = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
+              let whole = Range(m.range, in: s), let body = Range(m.range(at: 1), in: s) {
+            s.replaceSubrange(whole, with: "\\begin{\(e.env)}" + unbraceCells(String(s[body])) + "\\end{\(e.env)}")
+        }
+    }
+    return s.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+/// 矩阵格子：「{ 1 } & { -2 } \\ { 3 } & { 4 }」→「1 & -2 \\ 3 & 4」。只拆整格外面那一层花括号。
+private func unbraceCells(_ body: String) -> String {
+    body.components(separatedBy: "\\\\").map { row in
+        row.components(separatedBy: "&").map { cell -> String in
+            var t = cell.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.hasPrefix("{"), t.hasSuffix("}"), !t.dropFirst().dropLast().contains("{") {
+                t = String(t.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+            }
+            return t.replacingOccurrences(of: #"-\s+"#, with: "-", options: .regularExpression)
+        }.joined(separator: " & ")
+    }.joined(separator: " \\\\ ")
+}
+
+/// 按顺序试几个识别器：前一个抛错、给了空结果或 `timeout` 秒没回来就换下一个，最后一个的空结果照样返回（界面说「没认出来」）。
 /// 例如 MyScript（设备上）→ 百炼 → Server。
 public struct FallbackRecognizer: InkRecognizer {
     public var chain: [InkRecognizer]
+    /// 每个识别器最多等这么久。MyScript 卡在 waitForIdle、网络半通时不会一直转圈，也能落到下一个；nil 不限时。
+    public var timeout: Double?
 
-    public init(_ chain: [InkRecognizer]) {
+    public init(_ chain: [InkRecognizer], timeout: Double? = 15) {
         self.chain = chain
+        self.timeout = timeout
     }
 
     public func recognize(line: InkLine, imagePNG: Data?) async throws -> RecognitionResult {
         var lastError: Error = RecognizerError.badResponse("没有可用的识别器")
         for (k, r) in chain.enumerated() {
             do {
-                let result = try await r.recognize(line: line, imagePNG: imagePNG)
+                let result: RecognitionResult
+                if let timeout {
+                    result = try await withDeadline(seconds: timeout) { try await r.recognize(line: line, imagePNG: imagePNG) }
+                } else {
+                    result = try await r.recognize(line: line, imagePNG: imagePNG)
+                }
                 if !result.latex.isEmpty || k == chain.count - 1 { return result }
                 lastError = RecognizerError.badResponse("空结果")
             } catch {
@@ -48,6 +101,80 @@ public struct FallbackRecognizer: InkRecognizer {
             }
         }
         throw lastError
+    }
+}
+
+/// `withDeadline` 到点还没结果时抛的错。
+public struct DeadlineExceeded: LocalizedError, Equatable {
+    public var seconds: Double
+
+    public init(seconds: Double) { self.seconds = seconds }
+
+    public var errorDescription: String? { "超时（\(Int(seconds.rounded())) 秒没有结果）" }
+}
+
+/// `seconds` 秒内没结果就抛 `DeadlineExceeded`，并取消 `operation`。
+/// 和 TaskGroup 的写法不同：不等 `operation` 收尾，它不理会取消时也照样按时返回
+/// （卡住的 SDK 调用、Vapor 客户端底下的 EventLoopFuture 都不理会取消）。超时后它的结果丢掉。
+public func withDeadline<T>(seconds: Double, _ operation: @escaping () async throws -> T) async throws -> T {
+    let race = DeadlineRace<T>()
+    let nanoseconds = seconds > 0 ? UInt64(min(seconds, 1e9) * 1e9) : 0   // NaN、负数当 0，免得 UInt64 转换崩
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
+            race.attach(cont)
+            race.add(Task {
+                do { race.finish(.success(try await operation())) } catch { race.finish(.failure(error)) }
+            })
+            race.add(Task {
+                try? await Task.sleep(nanoseconds: nanoseconds)
+                race.finish(.failure(DeadlineExceeded(seconds: seconds)))
+            })
+        }
+    } onCancel: {
+        race.finish(.failure(CancellationError()))
+    }
+}
+
+/// 识别本身、计时器、外面的取消，谁先到就用谁的结果恢复 continuation（只恢复一次），再取消还在跑的任务。
+private final class DeadlineRace<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+    private var outcome: Result<T, Error>?
+    private var tasks: [Task<Void, Never>] = []
+
+    func attach(_ cont: CheckedContinuation<T, Error>) {
+        lock.lock()
+        guard let outcome else {
+            continuation = cont
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        cont.resume(with: outcome)   // 进来之前外面已经取消了
+    }
+
+    func add(_ task: Task<Void, Never>) {
+        lock.lock()
+        let done = outcome != nil
+        if !done { tasks.append(task) }
+        lock.unlock()
+        if done { task.cancel() }
+    }
+
+    func finish(_ result: Result<T, Error>) {
+        lock.lock()
+        guard outcome == nil else {
+            lock.unlock()
+            return
+        }
+        outcome = result
+        let cont = continuation
+        let running = tasks
+        continuation = nil
+        tasks = []
+        lock.unlock()
+        running.forEach { $0.cancel() }
+        cont?.resume(with: result)
     }
 }
 

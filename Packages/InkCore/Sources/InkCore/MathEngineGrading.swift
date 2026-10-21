@@ -2,7 +2,7 @@
 //  MathEngineGrading.swift
 //  把 MathEngine（P4）的判分结果翻译成 InkCore 的 `Annotation`。判分逻辑一行都不在这里。
 //  差异只有三处：bbox 的写法、说明是整行一条还是每个错误一条、错误码的名字。
-//  App 批改求导行走这里；临时的 `DerivativeCheck` 保留到真机跑通再删（P3 删）。
+//  App 批改求导行走这里；P3 临时的 `DerivativeCheck` 已删（断言搬进了 MathEngine 的 InkCoreCompatibilityTests）。
 //
 
 #if canImport(CoreGraphics)

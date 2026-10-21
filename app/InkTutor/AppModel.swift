@@ -7,7 +7,7 @@ import SwiftUI
 /// 整块画板的状态。
 ///
 /// 全局规则：先只显示原始墨迹；学生写完一段，双击 Pencil Pro 表示这一段输入完了，
-/// 笔尖旁弹出「函数 / 求解 / 几何」。选「函数」时用 MyScript iink 的 Math Recognizer 把这段笔迹收成 LaTeX，
+/// 笔尖旁弹出「函数 / 求解 / 检查 / 几何」。选「函数」时用 MyScript iink 的 Math Recognizer 把这段笔迹收成 LaTeX，
 /// 手写笔迹换成标准式子，式子右上角挂一张可以移动、缩放、旋转、收起的函数卡片。
 /// 「求解」把写下的式子直接算出来：在函数下面写 f'(x) 求导（图像里画出导函数），写 \int_0^2 f(x)dx、
 /// \lim_{x\to 3} f(x)、\sum_{k=1}^{n} k^2、x^2-4=0，或者一个不引用函数的完整式子，都直接给出结果；
@@ -250,7 +250,8 @@ final class AppModel {
         }
     }
 
-    /// 工具栏上的「完成一段」：双击没进回调（或用模拟器）时用它顶上。
+    /// 工具栏上的「识别」（不显示时在设置键的菜单里）：和双击走同一条路，只是没有落点，菜单弹在最近写的那一段最后一笔收笔的地方。
+    /// 一代、USB-C Pencil、手指不能双击，双击没进回调或用模拟器时也靠它。
     func confirmLatestSegment() {
         pencilDoubleTapped(at: nil)
     }
@@ -1350,7 +1351,13 @@ final class AppModel {
         setDrawing(PKDrawing())
         lineNumbers = [:]
         pendingChecks = [:]
-        // 演示从头来：回放的行号重新从第 1 行数（Server 那边也一起）。
+        resetReplay()
+    }
+
+    /// 演示从头来（清空、打开一份草稿）：回放的行号重新从第 1 行数（Server 那边也一起）。
+    /// 行状态是整个 App 共用一份，每份草稿的行号（F1、D1…）和笔画 id（s1、s2…）却都从头数：
+    /// 不清掉的话，新草稿里的 F1 会被当成上一份的 F1 擦过一轮，回放直接放「改正以后」的那一步。
+    private func resetReplay() {
         Self.replayTracker.reset()
         if let s = URL(string: UserDefaults.standard.string(forKey: "serverURL") ?? ""), s.host != nil {
             var req = URLRequest(url: s.appendingPathComponent("replay/reset"))
@@ -1462,7 +1469,8 @@ final class AppModel {
         var chain: [InkRecognizer]
         switch pref {
         case "myscript": chain = [myscript].compactMap { $0 }
-        case "direct": chain = [qwen].compactMap { $0 }
+        // 直连百炼 = 千问优先：千问出错或结果为空时，退到设备端 MyScript，再到 Server（初赛文案写的「MyScript 离线兜底」）
+        case "direct": chain = [qwen, myscript, mac].compactMap { $0 }
         case "server": chain = [mac].compactMap { $0 }
         case "replay": chain = []
         default: chain = [myscript, qwen, mac].compactMap { $0 }
@@ -1549,6 +1557,13 @@ extension AppModel {
         }
         clear()
         let left: CGFloat = 120
+        // recognize：写完 f(x)=x³−5x 点工具栏的「识别」（没有 Pencil Pro 时），菜单弹在最后一笔收笔的地方；
+        // settings：同一个画面上盖着设置页（「显示识别按键」开关）
+        if name == "recognize" || name == "settings" {
+            setDrawing(PKDrawing(strokes: DemoInk.strokes("f(x)=x^3-5x", at: CGPoint(x: left, y: 226), height: 54)))
+            confirmLatestSegment()
+            return
+        }
         if name == "menu" {
             setDrawing(PKDrawing(strokes: DemoInk.strokes("f(x)=x^3-5x", at: CGPoint(x: left, y: 226), height: 54)))
             let ink = InkSegmenter.bounds(of: strokes)
@@ -1837,6 +1852,7 @@ extension AppModel {
         checks = []
         pendingChecks = [:]
         lineNumbers = snap?.lineNumbers ?? [:]
+        resetReplay()
         setDrawing(d)
         guard let snap else { return }
         func strokes(_ data: Data) -> [PKStroke] { (try? PKDrawing(data: data))?.strokes ?? [] }
