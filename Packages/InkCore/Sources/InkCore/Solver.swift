@@ -10,6 +10,8 @@ public struct Solution: Equatable {
         case derivative, integral, limit, series, equation, evaluate
         /// 矩阵运算、逆矩阵、行列式。和「求解」共用一条结果，菜单上分开选。
         case matrix, inverse, determinant
+        /// 2×2 矩阵「看变换」：式子旁边挂一张卡片，画出单位方格变成什么样。
+        case transform
     }
 
     /// 在被引用的函数图像上标出来的东西。

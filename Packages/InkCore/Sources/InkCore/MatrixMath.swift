@@ -1,16 +1,19 @@
 import Foundation
 import MathEngine
 
-/// 「矩阵」二级菜单里的三种运算。
+/// 「矩阵」二级菜单里的四种运算。
 public enum MatrixAction: String, CaseIterable, Equatable, Sendable {
     case calculate
     case inverse
     case determinant
+    /// 2×2 矩阵：看它把单位方格变成什么样（卡片里拖基向量、做逆变换）。
+    case transform
 }
 
 /// 矩阵运算。识别结果里出现 pmatrix / bmatrix / matrix / array 时，菜单多一枚「矩阵」。
 /// 计算吃掉这一段里的一个或多个矩阵（加、减、乘、数乘、转置、已经写上的 ^{-1}）；
 /// 求逆、求行列式先把式子算成一个矩阵，再往下做。元素只认常数。
+/// 左边可以写名字：A = \begin{pmatrix}…\end{pmatrix}，结果写成「A = …，A^{-1} = …」。
 public enum MatrixMath {
     public static func contains(_ latex: String) -> Bool {
         let s = latex
@@ -29,6 +32,7 @@ public enum MatrixMath {
         case .matrix: return .calculate
         case .inverse: return .inverse
         case .determinant: return .determinant
+        case .transform: return .transform
         default: return nil
         }
     }
@@ -39,15 +43,35 @@ public enum MatrixMath {
         guard contains(latex) || contains(source) else {
             return outcome(source.isEmpty ? latex : source, nil, "没有认出矩阵", conclusive: false, operation: operation)
         }
+        let (name, body) = definition(source)
         do {
-            let expr = try Parser(source).parse()
+            let expr = try Parser(body).parse()
             let value = try expr.evaluate()
-            return try present(expr, value, action: action, operation: operation)
+            return try present(expr, value, name: name, action: action, operation: operation)
         } catch let problem as MatrixProblem {
             return outcome(source.isEmpty ? latex : source, nil, problem.message, conclusive: problem.conclusive, operation: operation)
         } catch {
             return outcome(source.isEmpty ? latex : source, nil, "没算出来", conclusive: false, operation: operation)
         }
+    }
+
+    /// 这一段算出来是不是一个 2×2 的数字矩阵（「看变换」用）。A = … 的名字不算在里面。
+    public static func linearMap(_ latex: String) -> LinearMap2? {
+        let source = preprocess(latex)
+        guard contains(latex) || contains(source), let expr = try? Parser(definition(source).body).parse(),
+              case .matrix(let m)? = try? expr.evaluate(), m.m == 2, m.n == 2 else { return nil }
+        return LinearMap2(a: m.rows[0][0].doubleValue, b: m.rows[0][1].doubleValue,
+                          c: m.rows[1][0].doubleValue, d: m.rows[1][1].doubleValue)
+    }
+
+    /// A = … 左边的名字；没写名字时为 nil。
+    public static func name(_ latex: String) -> String? {
+        definition(preprocess(latex)).name
+    }
+
+    /// 「看变换」里拖了基向量：式子改写成新的矩阵（名字留着）。
+    public static func rewrite(_ latex: String, with map: LinearMap2) -> String {
+        (name(latex).map { $0 + " = " } ?? "") + map.latex
     }
 
     fileprivate static let environments = ["pmatrix", "bmatrix", "Bmatrix", "vmatrix", "Vmatrix", "smallmatrix", "matrix", "array"]
@@ -57,35 +81,72 @@ public enum MatrixMath {
         case .calculate: return .matrix
         case .inverse: return .inverse
         case .determinant: return .determinant
+        case .transform: return .transform
         }
     }
 
-    private static func present(_ expr: Expr, _ value: Value, action: MatrixAction, operation: Solution.Operation) throws -> Solution {
+    /// 「A = …」：左边是一个字母（可以带下标、撇号），右边是要算的矩阵式子。别的写法原样返回。
+    static func definition(_ source: String) -> (name: String?, body: String) {
+        let chars = Array(source)
+        var depth = 0
+        for (k, c) in chars.enumerated() {
+            if c == "{" || c == "(" { depth += 1 } else if c == "}" || c == ")" { depth -= 1 }
+            guard c == "=", depth == 0 else { continue }
+            let lhs = String(chars[..<k]).trimmingCharacters(in: .whitespaces)
+            let rhs = String(chars[(k + 1)...]).trimmingCharacters(in: .whitespaces)
+            guard !rhs.isEmpty, lhs.range(of: #"^[A-Za-z](_\{?[A-Za-z0-9]+\}?)?'*$"#, options: .regularExpression) != nil else {
+                return (nil, source)
+            }
+            return (lhs, rhs)
+        }
+        return (nil, source)
+    }
+
+    private static func present(_ expr: Expr, _ value: Value, name: String?, action: MatrixAction,
+                                operation: Solution.Operation) throws -> Solution {
+        // 写了名字：左边照写「A = …」；只写了一个矩阵、不用算时不再「= 同一个矩阵」
+        let input = name.map { $0 + " = " + expr.latex() } ?? expr.latex()
+        let literal = expr.isLiteral
         switch action {
         case .calculate:
-            return outcome(expr.latex(), value.latex, nil, conclusive: false, operation: operation)
+            if name != nil, literal { return outcome(input, nil, nil, conclusive: false, operation: operation) }
+            return outcome(input, value.latex, nil, conclusive: false, operation: operation)
         case .inverse:
             guard case .matrix(let m) = value else {
                 throw MatrixProblem("这是一个数，没有逆矩阵", conclusive: true)
             }
             let inv = try m.inverse()
+            if let name {
+                return outcome(input, inv.latex, nil, conclusive: false, operation: operation, relation: ",\\; " + name + "^{-1} =")
+            }
             return outcome("\\left(" + expr.latex() + "\\right)^{-1}", inv.latex, nil, conclusive: false, operation: operation)
         case .determinant:
             if case .scalar(let r) = value {
-                return outcome(expr.latex(), RationalText.latex(r), nil, conclusive: false, operation: operation)
+                return outcome(input, RationalText.latex(r), nil, conclusive: false, operation: operation)
             }
             guard case .matrix(let m) = value else {
                 throw MatrixProblem("没有求出行列式", conclusive: false)
             }
             let d = try m.determinant()
-            let input = expr.isDet ? expr.latex() : "\\det\\left(" + expr.latex() + "\\right)"
-            return outcome(input, RationalText.latex(d), nil, conclusive: false, operation: operation)
+            if let name {
+                return outcome(input, RationalText.latex(d), nil, conclusive: false, operation: operation, relation: ",\\; \\det " + name + " =")
+            }
+            let det = expr.isDet ? expr.latex() : "\\det\\left(" + expr.latex() + "\\right)"
+            return outcome(det, RationalText.latex(d), nil, conclusive: false, operation: operation)
+        case .transform:
+            guard case .matrix(let m) = value else {
+                throw MatrixProblem("这是一个数，看不了变换", conclusive: true)
+            }
+            guard m.m == 2, m.n == 2 else {
+                throw MatrixProblem("看变换只支持 2×2 矩阵（这是 \(m.shapeText())）", conclusive: true)
+            }
+            return outcome(input, literal ? nil : m.latex, nil, conclusive: false, operation: operation)
         }
     }
 
     private static func outcome(_ input: String, _ result: String?, _ note: String?, conclusive: Bool,
-                                operation: Solution.Operation) -> Solution {
-        Solution(input: input, result: result, relation: "=", note: note, conclusive: conclusive,
+                                operation: Solution.Operation, relation: String = "=") -> Solution {
+        Solution(input: input, result: result, relation: relation, note: note, conclusive: conclusive,
                  operation: operation, references: [], hint: nil)
     }
 }
@@ -274,6 +335,12 @@ private indirect enum Expr: Equatable {
 
     var isDet: Bool {
         if case .det = self { return true }
+        return false
+    }
+
+    /// 只写了一个矩阵，没有要算的。
+    var isLiteral: Bool {
+        if case .matrix = self { return true }
         return false
     }
 

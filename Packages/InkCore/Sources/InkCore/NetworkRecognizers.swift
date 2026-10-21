@@ -71,7 +71,7 @@ public enum DashScope {
 
     public static func chat(apiKey: String, endpoint: URL = beijing, session: URLSession = .shared, model: String,
                             imagePNG: Data? = nil, system: String? = nil, prompt: String,
-                            maxTokens: Int = 300, temperature: Double = 0.2) async throws -> String {
+                            maxTokens: Int = 300, temperature: Double = 0.2, timeout: TimeInterval = 20) async throws -> String {
         var content: [[String: Any]] = []
         if let png = imagePNG {
             content.append(["type": "image_url", "image_url": ["url": "data:image/png;base64," + png.base64EncodedString()]])
@@ -87,7 +87,7 @@ public enum DashScope {
         req.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        req.timeoutInterval = 20
+        req.timeoutInterval = timeout
         let (data, resp) = try await session.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw RecognizerError.http(code, String(decoding: data.prefix(300), as: UTF8.self)) }
