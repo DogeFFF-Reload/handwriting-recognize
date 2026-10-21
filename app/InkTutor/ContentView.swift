@@ -68,18 +68,20 @@ struct BoardScreen: View {
     var body: some View {
         ZStack(alignment: .top) {
             GeometryReader { geo in
+                // 画布和横线纸就是窗口那么大（纸在画布里面滚）；式子、卡片那一层是整张纸那么大，挂在上面，不撑大下面这层
                 ZStack(alignment: .topLeading) {
                     PaperBackground(app: app)
                     PencilCanvas(app: app, eraserOn: app.eraserOn, penColor: app.penColor, penWidth: app.penWidth,
-                                 allowFinger: allowFinger, contentHeight: app.contentHeight)
+                                 allowFinger: allowFinger, contentHeight: app.contentHeight, contentWidth: app.contentWidth)
                     if !app.hasInk, app.functions.isEmpty, app.geometries.isEmpty, app.shapes.isEmpty {
                         EmptyBoardHint()
                             .scaleEffect(app.compact ? 0.78 : 1)
                             .position(x: geo.size.width / 2, y: geo.size.height * 0.46)
                             .transition(.opacity)
                     }
-                    ScrollingOverlay(app: app)
                 }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .overlay(alignment: .topLeading) { ScrollingOverlay(app: app) }
                 .onAppear { resized(geo.size) }
                 .onChange(of: geo.size) { _, s in resized(s) }
             }
@@ -175,7 +177,7 @@ private struct ScrollingOverlay: View {
 
     var body: some View {
         BoardOverlay(app: app)
-            .frame(width: app.boardSize.width, height: max(app.contentHeight, app.boardSize.height), alignment: .topLeading)
+            .frame(width: max(app.contentWidth, app.boardSize.width), height: max(app.contentHeight, app.boardSize.height), alignment: .topLeading)
             .coordinateSpace(name: Board.space)
             .offset(x: -app.scrollOffset.x, y: -app.scrollOffset.y)
     }
@@ -186,22 +188,26 @@ struct PaperBackground: View {
     var app: AppModel
 
     var body: some View {
-        let offset = app.scrollOffset.y
+        let offset = app.scrollOffset
         Canvas { ctx, size in
             // 第一条线在纸上 y = 132，往下每 76 一条；只画看得见的
             var rules = Path()
-            let first = max(0, ((offset - 132) / 76).rounded(.up))
-            var y: CGFloat = 132 + first * 76 - offset
+            let first = max(0, ((offset.y - 132) / 76).rounded(.up))
+            var y: CGFloat = 132 + first * 76 - offset.y
             while y < size.height {
                 rules.move(to: CGPoint(x: 0, y: y))
                 rules.addLine(to: CGPoint(x: size.width, y: y))
                 y += 76
             }
             ctx.stroke(rules, with: .color(Theme.rule), lineWidth: 1)
-            var margin = Path()
-            margin.move(to: CGPoint(x: 64, y: 0))
-            margin.addLine(to: CGPoint(x: 64, y: size.height))
-            ctx.stroke(margin, with: .color(Theme.margin), lineWidth: 1)
+            // 页边线在纸上 x = 64，纸往左滚时跟着出去
+            let x: CGFloat = 64 - offset.x
+            if x > 0 {
+                var margin = Path()
+                margin.move(to: CGPoint(x: x, y: 0))
+                margin.addLine(to: CGPoint(x: x, y: size.height))
+                ctx.stroke(margin, with: .color(Theme.margin), lineWidth: 1)
+            }
         }
         .background(Theme.paper)
         .allowsHitTesting(false)
