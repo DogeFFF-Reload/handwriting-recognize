@@ -1710,7 +1710,9 @@ extension AppModel {
         }
         if let integral = functions.first(where: { $0.solution?.operation == .integral }) { selection = .formula(integral.id) }
         f.card.size = CGSize(width: 430, height: 330)
-        f.card.center = CGPoint(x: max(f.anchor.x, 640) + 24 + 215, y: max(f.anchor.y - 12 - 165, topInset + 175))
+        // 竖屏时纸窄：卡片别出右边
+        let right = visibleRect.maxX - 215 - 16
+        f.card.center = CGPoint(x: min(max(f.anchor.x, 640) + 24 + 215, right), y: max(f.anchor.y - 12 - 165, topInset + 175))
     }
 
     /// 写一条函数（笔迹只是占位，识别结果直接给定），返回收成的那一项。
