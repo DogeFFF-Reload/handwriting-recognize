@@ -47,6 +47,10 @@ P2、P3、P4 把源码推到自己的分支。`main` 只表示这一版已经在
 | --- |
 | ![](docs/screenshots/solve.png) |
 
+| 几何：手画的正方形、椭圆、直角三角形（选中椭圆：焦点、节点、a b c e） | 几何：手画的正方体、圆柱、圆锥（选中正方体：尺寸节点、拖动旋转、三视图） |
+| --- | --- |
+| ![](docs/screenshots/shapes.png) | ![](docs/screenshots/solids.png) |
+
 ## MyScript iink
 
 - SDK：Swift 包 [MyScript/interactive-ink-packages-ios](https://github.com/MyScript/interactive-ink-packages-ios) 4.5.1，工程里已经加好（product `libiink`）。
