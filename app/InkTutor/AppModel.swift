@@ -1139,8 +1139,6 @@ extension AppModel {
     /// - card：标准式子 + 选中的函数卡片（转了一点）+ 一条收起的函数
     /// - reveal：f(x)=x²−4，下面写 f'(x) 求出来的 2x，卡片里画出导函数
     /// - solve：f(x)=x²−4，下面写 ∫_0^2 f(x)dx（卡片里涂出面积）、lim_{x→0} sin x / x、∑_{k=1}^n k²，选「求解」
-    /// - recognize：写完 f(x)=x³−5x 点工具栏的「识别」（没有 Pencil Pro 时），菜单弹在最后一笔收笔的地方
-    /// - settings：recognize 上面盖着设置页（「显示识别按键」开关）
     func loadDemo(_ name: String) {
         if name == "solve" {
             loadSolveDemo()
@@ -1171,6 +1169,8 @@ extension AppModel {
         }
         clear()
         let left: CGFloat = 120
+        // recognize：写完 f(x)=x³−5x 点工具栏的「识别」（没有 Pencil Pro 时），菜单弹在最后一笔收笔的地方；
+        // settings：同一个画面上盖着设置页（「显示识别按键」开关）
         if name == "recognize" || name == "settings" {
             setDrawing(PKDrawing(strokes: DemoInk.strokes("f(x)=x^3-5x", at: CGPoint(x: left, y: 226), height: 54)))
             confirmLatestSegment()

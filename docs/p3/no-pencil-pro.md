@@ -106,3 +106,12 @@ iPadOS **没有**公开 API 能直接查「配对的是哪一支 Pencil」，只
    - 应该是：开关开时，小胶囊里有「识别」；开关关时，设置键的菜单里有「识别」。
 8. 点「重新检测」：
    - 应该是：检测结果和手动选择都清掉，开关回到自动。
+
+## 状态（2026-10-21）
+
+- **还没编译验证过**。从 13:11 UTC（run 45）起，这个仓库所有分支的 CI 都没分到机器。GitHub 的提示是 “The job was not started because recent account payments have failed or your spending limit needs to be increased”，要仓库所有者到 Billing & plans 处理。处理好之后，重跑这个分支最新的 run，或者手动触发 `ci`（workflow_dispatch，选 `p3/no-pencil-pro`），确认 ios-build 是 BUILD SUCCEEDED，再看 `recognize`、`settings`、`compact` 三组截图。
+- **合并**：
+  - 和 `p1/redesign`：试合并没有冲突。
+  - 和 `p1/study-tools`：只有两处一行的冲突，两边的内容都留下就行。
+    - `ci.yml` 截图列表：两边都加了场景，合并后是 `… compact check transform compare recognize settings`。
+    - README 第 1 步那一句：保留「函数 / 求解 / 检查 / 几何」，再接上「识别」键的说明。
