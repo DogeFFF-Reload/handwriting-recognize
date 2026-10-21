@@ -68,18 +68,20 @@ struct BoardScreen: View {
     var body: some View {
         ZStack(alignment: .top) {
             GeometryReader { geo in
+                // 画布和横线纸就是窗口那么大（纸在画布里面滚）；式子、卡片那一层是整张纸那么大，挂在上面，不撑大下面这层
                 ZStack(alignment: .topLeading) {
                     PaperBackground(app: app)
                     PencilCanvas(app: app, eraserOn: app.eraserOn, penColor: app.penColor, penWidth: app.penWidth,
-                                 allowFinger: allowFinger, contentHeight: app.contentHeight)
+                                 allowFinger: allowFinger, contentHeight: app.contentHeight, contentWidth: app.contentWidth)
                     if !app.hasInk, app.functions.isEmpty, app.geometries.isEmpty, app.shapes.isEmpty {
                         EmptyBoardHint()
                             .scaleEffect(app.compact ? 0.78 : 1)
                             .position(x: geo.size.width / 2, y: geo.size.height * 0.46)
                             .transition(.opacity)
                     }
-                    ScrollingOverlay(app: app)
                 }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+                .overlay(alignment: .topLeading) { ScrollingOverlay(app: app) }
                 .onAppear { resized(geo.size) }
                 .onChange(of: geo.size) { _, s in resized(s) }
             }
@@ -91,6 +93,8 @@ struct BoardScreen: View {
             }
             .padding(.top, 8)
         }
+        // 只有 ZoomBadge 自己读 zoom：捏合时整屏不重算
+        .overlay(alignment: .bottomTrailing) { ZoomBadge(app: app) }
         .animation(.easeOut(duration: 0.25), value: app.hasInk)
         .sheet(isPresented: $showSettings) { SettingsView() }
         .alert("重命名草稿", isPresented: $renaming) {
@@ -109,9 +113,9 @@ struct BoardScreen: View {
             let (snap, drawing) = library.read(meta.id)
             app.restore(snap, drawing: drawing)
             lastSaved = (try? BoardLibrary.encoder.encode(app.snapshot())).map { ($0, app.drawingData) }
-            if let y = snap?.scrollY, y > 0 {
+            if let snap, snap.scrollY > 0 || (snap.scrollX ?? 0) > 0 || (snap.zoom ?? 1) != 1 {
                 try? await Task.sleep(nanoseconds: 100_000_000)
-                app.scroll(to: y)
+                app.scroll(to: snap.scrollY, x: snap.scrollX ?? 0, zoom: snap.zoom ?? 1)
             }
             // 开着的时候每 3 秒看一次，有变化就存；缩略图最多一分钟换一次（App 被直接关掉时画廊里也是新的）
             var lastThumb = Date()
@@ -169,15 +173,56 @@ struct BoardScreen: View {
     }
 }
 
-/// 式子、卡片、图形那一层：用画布坐标摆放，纸滚多少它就移多少。只有这一层读 scrollOffset，滚动时别的不重算。
+/// 式子、卡片、图形那一层：用画布坐标摆放，纸滚多少它就移多少、纸放大几倍它就放大几倍。
+/// 只有这一层读 scrollOffset 和 zoom，滚动、缩放时别的不重算。
+/// 拖动手势在缩放之前的坐标系（Board.space）里量，量出来就是画布坐标。
 private struct ScrollingOverlay: View {
     var app: AppModel
 
     var body: some View {
         BoardOverlay(app: app)
-            .frame(width: app.boardSize.width, height: max(app.contentHeight, app.boardSize.height), alignment: .topLeading)
+            .frame(width: max(app.contentWidth, app.boardSize.width), height: max(app.contentHeight, app.boardSize.height), alignment: .topLeading)
             .coordinateSpace(name: Board.space)
-            .offset(x: -app.scrollOffset.x, y: -app.scrollOffset.y)
+            .environment(\.inkZoom, app.zoom)
+            .scaleEffect(app.zoom, anchor: .topLeading)
+            .offset(x: -app.scrollOffset.x * app.zoom, y: -app.scrollOffset.y * app.zoom)
+    }
+}
+
+/// 缩放过时右下角显示倍数，点一下回到 100%。
+private struct ZoomBadge: View {
+    var app: AppModel
+
+    private var zoomed: Bool { abs(app.zoom - 1) > 0.01 }
+
+    var body: some View {
+        ZStack {
+            if zoomed {
+                button
+                    .padding(20)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: zoomed)
+    }
+
+    private var button: some View {
+        Button { app.resetZoom() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.left.and.down.right.magnifyingglass")
+                Text("\(Int((app.zoom * 100).rounded()))%").monospacedDigit()
+            }
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 12)
+            .frame(height: 34)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.hairline))
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.primary)
+        .hoverEffect(.highlight)
+        .accessibilityLabel("缩放 \(Int((app.zoom * 100).rounded()))%，点一下回到 100%")
     }
 }
 
@@ -186,22 +231,27 @@ struct PaperBackground: View {
     var app: AppModel
 
     var body: some View {
-        let offset = app.scrollOffset.y
+        let offset = app.scrollOffset
+        let zoom = app.zoom
         Canvas { ctx, size in
-            // 第一条线在纸上 y = 132，往下每 76 一条；只画看得见的
+            // 第一条线在纸上 y = 132，往下每 76 一条；只画看得见的（纸放大几倍，线距跟着放大几倍）
             var rules = Path()
-            let first = max(0, ((offset - 132) / 76).rounded(.up))
-            var y: CGFloat = 132 + first * 76 - offset
+            let first = max(0, ((offset.y - 132) / 76).rounded(.up))
+            var y: CGFloat = (132 + first * 76 - offset.y) * zoom
             while y < size.height {
                 rules.move(to: CGPoint(x: 0, y: y))
                 rules.addLine(to: CGPoint(x: size.width, y: y))
-                y += 76
+                y += 76 * zoom
             }
             ctx.stroke(rules, with: .color(Theme.rule), lineWidth: 1)
-            var margin = Path()
-            margin.move(to: CGPoint(x: 64, y: 0))
-            margin.addLine(to: CGPoint(x: 64, y: size.height))
-            ctx.stroke(margin, with: .color(Theme.margin), lineWidth: 1)
+            // 页边线在纸上 x = 64，纸往左滚时跟着出去
+            let x: CGFloat = (64 - offset.x) * zoom
+            if x > 0 {
+                var margin = Path()
+                margin.move(to: CGPoint(x: x, y: 0))
+                margin.addLine(to: CGPoint(x: x, y: size.height))
+                ctx.stroke(margin, with: .color(Theme.margin), lineWidth: 1)
+            }
         }
         .background(Theme.paper)
         .allowsHitTesting(false)
@@ -214,6 +264,7 @@ struct SettingsView: View {
     @AppStorage("serverURL") private var server = ""
     @AppStorage("allowFinger") private var allowFinger = false
     @AppStorage("recordReplay") private var recordReplay = false
+    @AppStorage("checkSocratic") private var checkSocratic = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -230,7 +281,16 @@ struct SettingsView: View {
                 } footer: {
                     Text("自动：MyScript 就绪就用它（设备上识别），认不出时再试百炼和 Server；都没有就回放。"
                          + "指定的引擎没配好（例如选了百炼却没填 Key）时也按这个顺序。"
-                         + "回放不看笔迹内容：第一条函数先当作 x^3-5x，改过笔迹之后当作 x^3-3x；选「求解」的那一行当作 f'(x)，按上面的函数直接求。")
+                         + "回放不看笔迹内容：第一条函数先当作 x^3-5x，改过笔迹之后当作 x^3-3x；选「求解」的那一行当作 f'(x)，按上面的函数直接求；"
+                         + "选「批改」的那一行先当作 f'(x)=3x^2-3x，擦改一轮之后当作 f'(x)=3x^2-3。")
+                }
+                Section {
+                    Toggle("批改只提问，不给正确答案", isOn: $checkSocratic)
+                } header: {
+                    Text("批改")
+                } footer: {
+                    Text("在函数下面手写 f'(x) = …，双击选「批改」。关着：圈出算错的那一项，旁边写出正确结果和原因。"
+                         + "打开：只圈出来、问一句，屏幕上不出现正确导数，学生自己改对为止。改对后图像里才画出导函数、极值点和切线。")
                 }
                 Section {
                     LabeledContent("状态") {

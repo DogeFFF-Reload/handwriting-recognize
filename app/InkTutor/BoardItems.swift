@@ -7,8 +7,9 @@ import SwiftUI
 /// 双击笔身后在笔尖旁选的处理。
 /// 「求解」把求导、积分、极限、求和、解方程合在一起：写的是什么就算什么（f'(x)、\int_0^2 f(x)dx、\lim…、\sum…、x^2-4=0）。
 /// 「矩阵」只在识别结果里真有矩阵时出现，点开是计算 / 求逆 / 求行列式。
+/// 「批改」不替学生算：学生自己写 f'(x) = …，笔迹留在纸上，错的那一项画圈，旁边一句说明（或一句反问）。
 enum SegmentKind: String, CaseIterable, Identifiable {
-    case function, solve, geometry, matrix
+    case function, solve, check, geometry, matrix
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
         switch self {
         case .function: return "函数"
         case .solve: return "求解"
+        case .check: return "批改"
         case .geometry: return "几何"
         case .matrix: return "矩阵"
         }
@@ -25,6 +27,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
         switch self {
         case .function: return "收成标准式子并作图"
         case .solve: return "求导、积分、极限、求和、解方程，直接算出结果"
+        case .check: return "检查自己写的导数，圈出算错的那一项"
         case .geometry: return "收成动态几何"
         case .matrix: return "计算、求逆矩阵、求行列式"
         }
@@ -33,7 +36,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
     var mode: InkMode {
         switch self {
         case .function: return .function
-        case .solve: return .derivative   // 回放脚本里求导那几行记在 derivative 下
+        case .solve, .check: return .derivative   // 回放脚本里求导那几行记在 derivative 下
         case .geometry: return .geometry
         case .matrix: return .function
         }
@@ -190,6 +193,48 @@ final class FunctionItem: Identifiable {
         size = MathLabel.measure(latex, fontSize: fontSize)
         if let parsed = try? FunctionDefinition.parse(latex) { definition = parsed }
     }
+}
+
+/// 选「批改」的一行：学生自己写的 f'(x) = …。笔迹留在纸上不收走，判出来的结果画在笔迹上面。
+@Observable
+final class CheckItem: Identifiable {
+    let id = UUID()
+    /// 回放用的行号 C1、C2…：改完再批改同一行时沿用，回放才数得对「擦过几轮」。
+    let lineID: String
+    var revision: Int
+    /// 这一行的笔（擦掉其中一笔或在旁边补写，圈就先收起来）。
+    var strokeIDs: [String]
+    var band: CGRect
+    /// 识别出来的学生这一行。
+    var latex: String
+    /// 对照的是哪条函数。
+    var parentID: UUID
+    var ok = false
+    /// 要圈的地方（错的那一项；圈不到项时是整行）。
+    var marks: [CheckMark] = []
+    /// 圈旁的一句：direct 模式是说明（带正确项），socratic 模式是反问（不带）。
+    var message: String?
+    /// direct 模式下整行判错时，正确的导数（排成式子显示）。
+    var answerLatex: String?
+    var socratic = false
+    /// 批改之后这一行又动了笔：圈先收起来，等改完再双击批改。
+    var stale = false
+    var engine: String?
+    var ms: Int?
+
+    init(lineID: String, revision: Int, strokeIDs: [String], band: CGRect, latex: String, parentID: UUID) {
+        self.lineID = lineID
+        self.revision = revision
+        self.strokeIDs = strokeIDs
+        self.band = band
+        self.latex = latex
+        self.parentID = parentID
+    }
+}
+
+struct CheckMark: Identifiable, Equatable {
+    let id = UUID()
+    var rect: CGRect
 }
 
 /// 选「几何」认出来的一个图形：直接画在纸上原来草图的位置（不放卡片），选中后拖节点改形状、大小、方向。

@@ -84,6 +84,8 @@ struct ShapeHandles: View {
             }
             ForEach(handles) { h in
                 HandleKnob(role: h.role, active: active == h.role)
+                    // 纸放大缩小时节点在屏幕上一样大，手指好按
+                    .scaleEffect(1 / app.zoom)
                     .position(h.point)
                     .gesture(
                         DragGesture(minimumDistance: 0, coordinateSpace: .named(Board.space))

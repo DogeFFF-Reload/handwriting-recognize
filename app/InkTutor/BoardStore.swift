@@ -86,6 +86,9 @@ struct BoardSnapshot: Codable {
     var lineNumbers: [String: Int]
     /// 上次看到哪儿了：重新打开时滚回去。
     var scrollY: CGFloat
+    /// 左右滚到哪儿、放大了几倍（旧草稿里没有，按 0 和 1）。
+    var scrollX: CGFloat? = nil
+    var zoom: CGFloat? = nil
 }
 
 /// 所有草稿。

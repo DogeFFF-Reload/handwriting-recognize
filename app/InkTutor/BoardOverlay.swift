@@ -28,11 +28,15 @@ struct BoardOverlay: View {
             ForEach(app.functions) { item in
                 FunctionCard(item: item, app: app)
             }
+            // 批改：圈画在学生自己的笔迹上，那句话浮在卡片上面
+            ForEach(app.checks) { item in
+                CheckView(item: item, app: app)
+            }
 
             // 式子的操作条画在卡片上面，不会被挂在右上角的卡片挡住
             if case .formula(let id)? = app.selection, let item = app.functions.first(where: { $0.id == id }), !item.showingInk {
                 FormulaActionBar(item: item, app: app)
-                    .scaleEffect(app.compact ? 0.86 : 1, anchor: .bottomLeading)
+                    .scaleEffect(chromeScale, anchor: .bottomLeading)
                     .pinned(.bottomLeading, at: CGPoint(x: item.frame.minX - 10, y: item.frame.minY - 14))
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
@@ -41,7 +45,7 @@ struct BoardOverlay: View {
             if case .shape(let id)? = app.selection, let item = app.shapes.first(where: { $0.id == id }) {
                 ShapeHandles(item: item, app: app)
                 ShapeInfoBar(item: item, app: app)
-                    .scaleEffect(app.compact ? 0.86 : 1, anchor: infoBarAlignment(item) == .topLeading ? .topLeading : .bottomLeading)
+                    .scaleEffect(chromeScale, anchor: infoBarAlignment(item) == .topLeading ? .topLeading : .bottomLeading)
                     .pinned(infoBarAlignment(item), at: infoBarAnchor(item))
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
@@ -49,19 +53,22 @@ struct BoardOverlay: View {
             ForEach(app.busy) { BusyOverlay(job: $0) }
 
             if let menu = app.menu {
-                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInset, compact: app.compact, onChoose: { app.choose($0) }, onMatrix: { app.chooseMatrix($0) })
+                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInsetOnPaper, compact: app.compact, zoom: app.zoom, onChoose: { app.choose($0) }, onMatrix: { app.chooseMatrix($0) })
                     .transition(.opacity)
             }
 
-            ForEach(app.toasts) { ToastView(toast: $0, visible: app.visibleRect) }
+            ForEach(app.toasts) { ToastView(toast: $0, visible: app.visibleRect, zoom: app.zoom) }
         }
     }
+
+    /// 操作条、信息条在屏幕上的大小：窗口化时小一号；纸放大缩小时反过来缩回去，屏幕上不变。
+    private var chromeScale: CGFloat { (app.compact ? 0.86 : 1) / app.zoom }
 
     /// 信息条放在图形上方；旋转手柄在上方时（多边形）放到下方，免得挡住手柄。
     private func barBelow(_ item: ShapeItem) -> Bool {
         let box = item.figure.bounds
         guard let r = item.figure.handles.first(where: { $0.role == .rotate }) else {
-            return box.minY < app.visibleRect.minY + app.topInset + 70
+            return box.minY < app.visibleRect.minY + app.topInsetOnPaper + 70 / app.zoom
         }
         return r.point.y < box.midY && box.maxY + 80 < app.visibleRect.maxY
     }
@@ -77,8 +84,8 @@ struct BoardOverlay: View {
         // 立体图形下方紧挨着是「拖动旋转」的手柄
         if case .solid = item.figure, below { gap = 66 }
         let v = app.visibleRect
-        let x = min(max(box.minX - 10, v.minX + 16), v.maxX - 560)
-        let y = below ? box.maxY + gap : max(box.minY - gap, v.minY + app.topInset + 8)
+        let x = min(max(box.minX - 10, v.minX + 16 / app.zoom), v.maxX - 560 / app.zoom)
+        let y = below ? box.maxY + gap : max(box.minY - gap, v.minY + app.topInsetOnPaper + 8 / app.zoom)
         return CGPoint(x: max(x, v.minX + 16), y: y)
     }
 }
@@ -112,6 +119,7 @@ struct FormulaView: View {
             .frame(height: 34)
             .background(.regularMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.hairline))
+            .scaleEffect(1 / app.zoom, anchor: .topLeading)
             .pinned(.topLeading, at: CGPoint(x: item.frame.minX, y: item.frame.maxY + 14))
             .transition(.opacity)
         } else {
@@ -253,6 +261,126 @@ private struct BarButton: View {
     }
 }
 
+// MARK: - 批改
+
+/// 「批改」画在学生自己的笔迹上：错的那一项画一个红圈，对了在行尾打一个绿勾。
+/// 先圈后字：圈 0.35 秒画完，旁边那句话再出来（对了的那句过几秒自己收起）。
+/// 批改之后这一行又动了笔，圈收起来，换成一句「改好后双击」。
+struct CheckView: View {
+    @Bindable var item: CheckItem
+    var app: AppModel
+    @State private var drawn = false
+    @State private var talking = false
+
+    private var tint: Color { item.ok ? Theme.ok : Theme.wrong }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if item.stale {
+                staleHint
+            } else {
+                if item.ok {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: min(max(item.band.height * 0.6, 24), 48), weight: .bold))
+                        .foregroundStyle(Theme.ok)
+                        .scaleEffect(drawn ? 1 : 0.3)
+                        .opacity(drawn ? 1 : 0)
+                        .position(x: item.band.maxX + 34, y: item.band.midY)
+                        .allowsHitTesting(false)
+                }
+                ForEach(item.marks) { mark in
+                    let r = mark.rect.insetBy(dx: -9, dy: -8)
+                    Ellipse()
+                        .trim(from: 0, to: drawn ? 1 : 0)
+                        .stroke(Theme.wrong, style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
+                        .frame(width: r.width, height: r.height)
+                        .rotationEffect(.degrees(-3))
+                        .position(x: r.midX, y: r.midY)
+                        .allowsHitTesting(false)
+                }
+                if talking, let message = item.message {
+                    bubble(message)
+                        .scaleEffect((app.compact ? 0.86 : 1) / app.zoom, anchor: .topLeading)
+                        .pinned(.topLeading, at: bubbleAnchor)
+                        .transition(.opacity.combined(with: .offset(y: -6)))
+                }
+            }
+        }
+        .onAppear(perform: play)
+    }
+
+    private func play() {
+        withAnimation(.easeOut(duration: 0.35)) { drawn = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) { talking = true }
+        }
+        if item.ok {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) {
+                withAnimation(.easeOut(duration: 0.3)) { talking = false }
+            }
+        }
+    }
+
+    /// 那句话放在这一行下面，从圈的左边开始；不跑到屏幕外。
+    private var bubbleAnchor: CGPoint {
+        let v = app.visibleRect
+        let x0 = (item.ok ? item.band.minX : item.marks.first?.rect.minX ?? item.band.minX) - 12
+        let x = min(max(x0, v.minX + 16 / app.zoom), v.maxX - 340 / app.zoom)
+        return CGPoint(x: max(x, v.minX + 16 / app.zoom), y: item.band.maxY + 16)
+    }
+
+    private func bubble(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: item.ok ? "checkmark.circle.fill" : item.socratic ? "questionmark.bubble.fill" : "lightbulb.fill")
+                .font(.system(size: 17))
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let answer = item.answerLatex {
+                    MathLabel(answer, fontSize: 20, color: UIColor(Theme.ok))
+                        .fixedSize()
+                }
+            }
+            .frame(width: 260, alignment: .leading)
+            Button {
+                app.dismissCheck(item)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("收起批改")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(tint.opacity(0.35)))
+        .shadow(color: .black.opacity(0.1), radius: 10, y: 4)
+    }
+
+    private var staleHint: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "scribble.variable").foregroundStyle(Theme.accent)
+            Text("改好后双击笔身，选「批改」").font(.footnote)
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 32)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.hairline))
+        .scaleEffect(1 / app.zoom, anchor: .topLeading)
+        .pinned(.topLeading, at: CGPoint(x: item.band.minX, y: item.band.maxY + 12))
+        .allowsHitTesting(false)
+        .transition(.opacity)
+    }
+}
+
 // MARK: - 识别中、淡出、提示
 
 /// 正在识别的那一段：一层淡淡的底色，一道光扫过去，右下角写「识别中」。
@@ -273,7 +401,7 @@ private struct BusyOverlay: View {
             .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.mini)
-                    Text(job.kind == .solve ? "计算中" : "识别中").font(.caption2.weight(.semibold))
+                    Text(job.kind == .solve ? "计算中" : job.kind == .check ? "批改中" : "识别中").font(.caption2.weight(.semibold))
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(.regularMaterial, in: Capsule())
@@ -310,6 +438,8 @@ private struct ToastView: View {
     let toast: Toast
     /// 看得见的那块纸（画布坐标）：提示不跑到屏幕外。
     var visible: CGRect
+    /// 纸放大了几倍：提示反过来缩回去，屏幕上始终一样大。
+    var zoom: CGFloat = 1
 
     private var icon: String {
         switch toast.style {
@@ -340,8 +470,9 @@ private struct ToastView: View {
         .overlay(Capsule().strokeBorder(tint.opacity(0.3)))
         .shadow(color: .black.opacity(0.1), radius: 12, y: 4)
         .fixedSize()
-        .position(x: min(max(toast.point.x, visible.minX + 180), visible.maxX - 180),
-                  y: min(max(toast.point.y, visible.minY + 110), visible.maxY - 40))
+        .scaleEffect(1 / zoom)
+        .position(x: min(max(toast.point.x, visible.minX + 180 / zoom), visible.maxX - 180 / zoom),
+                  y: min(max(toast.point.y, visible.minY + 110 / zoom), visible.maxY - 40 / zoom))
         .allowsHitTesting(false)
         .transition(.scale(scale: 0.9).combined(with: .opacity))
     }

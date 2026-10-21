@@ -2,6 +2,18 @@ import SwiftMath
 import SwiftUI
 import UIKit
 
+/// 外面那一层被 scaleEffect 放大了几倍（App 的纸可以捏合缩放）。MathLabel 按它提高分辨率。
+private struct InkZoomKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+public extension EnvironmentValues {
+    var inkZoom: CGFloat {
+        get { self[InkZoomKey.self] }
+        set { self[InkZoomKey.self] = newValue }
+    }
+}
+
 /// 用 SwiftMath 排一段 LaTeX。P1 的识别回显、direct 模式的正确项、换掉手写笔迹的标准式子、卡片标题都用这一个组件。
 /// 排不了的式子（SwiftMath 报错）退回等宽原文，不让排版挡住演示。
 public struct MathLabel: UIViewRepresentable {
@@ -40,6 +52,14 @@ public struct MathLabel: UIViewRepresentable {
     public func updateUIView(_ v: MTMathUILabel, context: Context) {
         Self.configure(v, latex: latex, fontSize: fontSize, color: color, mode: style.mode)
         v.textAlignment = alignment
+        // 外面把整层放大了（App 的纸可以捏合缩放）：按放大后的分辨率重画，不然式子是拉糊的。
+        // 倍数取到 0.5 一档，捏合时不至于每一帧都重画。
+        let zoom = max(1, (context.environment.inkZoom * 2).rounded(.up) / 2)
+        let scale = context.environment.displayScale * zoom
+        if abs(v.contentScaleFactor - scale) > 0.01 {
+            v.contentScaleFactor = scale
+            v.setNeedsDisplay()
+        }
     }
 
     @available(iOS 16.0, *)

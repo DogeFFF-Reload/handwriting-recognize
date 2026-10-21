@@ -1,7 +1,7 @@
 import InkCore
 import SwiftUI
 
-/// 双击笔身后在笔尖旁弹出的菜单：函数 / 求解 / 几何。
+/// 双击笔身后在笔尖旁弹出的菜单：函数 / 求解 / 批改 / 几何。
 /// 识别结果里有矩阵时再加一枚「矩阵」，点开是计算、求逆矩阵、求行列式。
 ///
 /// 圆钮沿笔尖上方的一段圆弧展开（右手握笔时手在笔尖右下，不会挡住）；
@@ -14,17 +14,20 @@ struct SegmentMenu: View {
     var topInset: CGFloat
     /// 窗口化时整个菜单小一号。
     var compact = false
+    /// 纸放大了几倍。菜单整层跟着纸缩放，圆钮反过来缩回去，屏幕上始终一样大；距离按画布坐标换算。
+    var zoom: CGFloat = 1
     var onChoose: (SegmentKind) -> Void
     var onMatrix: (MatrixAction) -> Void
 
     @State private var shown = false
     @State private var phase: CGFloat = 0
 
-    private var radius: CGFloat { compact ? 68 : 92 }
+    private var radius: CGFloat { (compact ? 68 : 92) / zoom }
+    /// 圆钮在屏幕上的直径；在画布上占 size / zoom。
     private var size: CGFloat { compact ? 46 : 64 }
 
     private var kinds: [SegmentKind] {
-        var list: [SegmentKind] = [.function, .solve]
+        var list: [SegmentKind] = [.function, .solve, .check]
         if state.offersMatrix { list.append(.matrix) }
         list.append(.geometry)
         return list
@@ -50,14 +53,14 @@ struct SegmentMenu: View {
                 .strokeBorder(Theme.accent, lineWidth: 2)
                 .background(Circle().fill(Theme.accent.opacity(0.15)))
                 .frame(width: 18, height: 18)
-                .scaleEffect(shown ? 1 : 0.2)
+                .scaleEffect((shown ? 1 : 0.2) / zoom)
                 .animation(.spring(response: 0.3, dampingFraction: 0.6), value: shown)
                 .position(state.anchor)
                 .allowsHitTesting(false)
 
             ForEach(Array(kinds.enumerated()), id: \.element) { i, kind in
                 option(kind)
-                    .scaleEffect(shown ? 1 : 0.3)
+                    .scaleEffect((shown ? 1 : 0.3) / zoom)
                     .opacity(shown ? 1 : 0)
                     .position(shown ? spots[i] : state.anchor)
                     .animation(.spring(response: 0.34, dampingFraction: 0.7).delay(Double(i) * 0.035), value: shown)
@@ -68,6 +71,7 @@ struct SegmentMenu: View {
                 let actions = submenuSpots(from: spots[index])
                 ForEach(Array(MatrixAction.allCases.enumerated()), id: \.element) { i, action in
                     matrixAction(action)
+                        .scaleEffect(1 / zoom)
                         .position(actions[i])
                         .transition(.scale(scale: 0.7).combined(with: .opacity))
                 }
@@ -80,12 +84,13 @@ struct SegmentMenu: View {
         }
     }
 
-    /// 圆钮绕笔尖展开成扇形。三个时间隔 50°，多了「矩阵」就稍收一点。
+    /// 圆钮绕笔尖展开成扇形。三个时间隔 50°，四个以上（批改、矩阵）稍收一点。
     /// 优先往右上方展开，选第一个既不压住这段笔迹、也不出屏幕、不钻到工具栏下面的。
     private func fan(_ count: Int) -> [CGPoint] {
         let a = state.anchor
         let ink = state.segment.bounds.insetBy(dx: -8, dy: -8)
-        let half: CGFloat = size / 2 + 2
+        let half: CGFloat = (size / 2 + 2) / zoom
+        let edge: CGFloat = 8 / zoom
         let step = count > 3 ? 42.0 : 50.0
         let offsets = (0..<count).map { step * (Double($0) - Double(count - 1) / 2) }
         func spots(_ center: Double) -> [CGPoint] {
@@ -97,16 +102,16 @@ struct SegmentMenu: View {
         func fits(_ ps: [CGPoint]) -> Bool {
             ps.allSatisfy { p in
                 let box = CGRect(x: p.x - half, y: p.y - half, width: 2 * half, height: 2 * half)
-                return !box.intersects(ink) && box.minX > visible.minX + 8 && box.maxX < visible.maxX - 8
-                    && box.minY > visible.minY + topInset && box.maxY < visible.maxY - 8
+                return !box.intersects(ink) && box.minX > visible.minX + edge && box.maxX < visible.maxX - edge
+                    && box.minY > visible.minY + topInset && box.maxY < visible.maxY - edge
             }
         }
         for center in [-60.0, -90, -30, 0, -120, -150, 180, 30, 150, 60, 120, 90] where fits(spots(center)) {
             return spots(center)
         }
         return spots(-90).map {
-            CGPoint(x: min(max($0.x, visible.minX + 44), visible.maxX - 44),
-                    y: min(max($0.y, visible.minY + topInset + 40), visible.maxY - 44))
+            CGPoint(x: min(max($0.x, visible.minX + 44 / zoom), visible.maxX - 44 / zoom),
+                    y: min(max($0.y, visible.minY + topInset + 40 / zoom), visible.maxY - 44 / zoom))
         }
     }
 
@@ -119,11 +124,12 @@ struct SegmentMenu: View {
         let uy = vy / len
         let sx = -uy
         let sy = ux
-        let center = CGPoint(x: matrix.x + ux * 108, y: matrix.y + uy * 108)
+        let out = 108 / zoom, apart = 128 / zoom
+        let center = CGPoint(x: matrix.x + ux * out, y: matrix.y + uy * out)
         return (-1...1).map { i in
-            let p = CGPoint(x: center.x + sx * CGFloat(i) * 128, y: center.y + sy * CGFloat(i) * 128)
-            return CGPoint(x: min(max(p.x, visible.minX + 64), visible.maxX - 64),
-                           y: min(max(p.y, visible.minY + topInset + 22), visible.maxY - 22))
+            let p = CGPoint(x: center.x + sx * CGFloat(i) * apart, y: center.y + sy * CGFloat(i) * apart)
+            return CGPoint(x: min(max(p.x, visible.minX + 64 / zoom), visible.maxX - 64 / zoom),
+                           y: min(max(p.y, visible.minY + topInset + 22 / zoom), visible.maxY - 22 / zoom))
         }
     }
 
@@ -203,6 +209,8 @@ struct SegmentMenu: View {
                 Text("∫").font(.system(size: 22, design: .serif).italic())
                 Text("Σ").font(.system(size: 13, design: .serif)).baselineOffset(-1)
             }
+        case .check:
+            Image(systemName: "checkmark.circle").font(.system(size: 19, weight: .medium))
         case .geometry:
             Image(systemName: "triangle").font(.system(size: 18, weight: .medium))
         case .matrix:
