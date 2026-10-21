@@ -161,7 +161,7 @@ struct BoardScreen: View {
         let drawing = app.drawingData
         let changed = lastSaved.map { $0.board != board || $0.drawing != drawing } ?? true
         let thumbnail = thumbnail && (changed || force)
-        guard changed || thumbnail else { return }
+        guard changed || thumbnail else { return false }
         let image = thumbnail ? BoardThumbnail.capture() : nil
         library.write(meta.id, board: board, drawing: drawing, thumbnail: image)
         lastSaved = (board, drawing)
