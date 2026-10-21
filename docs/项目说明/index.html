@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>笔迹 AI 家教 · 项目说明</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ======================= 封面 ======================= -->
+<section class="cover">
+  <div class="event">天猫 AI 黑客松 · 初赛作品 · 项目说明</div>
+  <h1>笔迹 AI 家教</h1>
+  <div class="sub">让手写的数学自己动起来</div>
+  <div class="track">赛道：效率进化（用 AI 重构学习、研究与工作方式）</div>
+  <p class="one">
+    一款 iPad + Apple Pencil 原生应用。学生在整屏的纸上手写数学，写完双击 Pencil，AI 读懂这段手写，原地换成标准式子、可拖动缩放的函数图像、算好的导数、积分、极限和求和，以及可以拖节点的几何图形——草稿纸本身就是计算和作图工具。</p>
+  <div class="hero">
+    <img src="img/cover.jpg" alt="求解：积分、极限、求和，函数卡片里涂出积分面积">
+  </div>
+  <div class="hero-cap">求解画面：手写的积分、极限、求和换成标准式子，算出的部分为绿色；右边 f(x) 的卡片里涂出了积分面积。（iPad 模拟器截图）</div>
+  <div class="foot">
+    <div><div class="k">作品形态</div>iPadOS 原生 App（Swift / SwiftUI / PencilKit）</div>
+    <div><div class="k">AI</div>阿里云百炼 Qwen 视觉模型（主识别）+ MyScript 设备端识别（兜底）</div>
+    <div><div class="k">团队</div>RuikAn-n、DogeFFF、Interphynity、Drkarmic</div>
+  </div>
+</section>
+
+<!-- ======================= 1 问题与场景 ======================= -->
+<section class="page">
+  <h2><span class="no">01</span>要解决的问题和使用场景</h2>
+
+  <h3>问题</h3>
+  <p>
+    学生在平板上演算时，常常想看一眼函数图像、验算一个积分或极限、把随手画的图变成标准的几何图形。现在的做法是切到计算器或作图软件，把式子重新敲一遍——手写和工具之间来回切换，思路被打断。</p>
+
+  <h3>我们的做法</h3>
+  <p>
+    不让学生离开草稿纸：AI 直接读懂手写，结果原地出现在纸上。<b>AI 负责「读懂」</b>（手写 → LaTeX），<b>计算交给本机</b>的符号和数值方法，不让大模型去算。面向中学和大学低年级学生。</p>
+
+  <h3>一次完整的操作</h3>
+  <div class="flow">
+    <div><span class="n">① 写</span>整屏一张纸，先只显示原始墨迹，不打断书写。</div>
+    <div><span class="n">② 双击</span>写完一段，双击 Pencil Pro（或点工具栏「完成一段」）。</div>
+    <div><span class="n">③ 选</span>笔尖旁弹出「函数 / 求解 / 几何」；认出矩阵时多一枚「矩阵」。</div>
+    <div><span class="n">④ 看</span>笔迹淡出，换成标准式子、函数卡片、计算结果或标准图形。</div>
+  </div>
+
+  <figure>
+    <div class="shot"><img src="img/menu.jpg" alt="双击后笔尖旁的菜单"></div>
+    <figcaption><b>双击后笔尖旁的菜单。</b>虚线框是这一段笔迹，旁边是「函数 / 求解 / 几何」三枚按钮。</figcaption>
+  </figure>
+
+  <h3>使用场景</h3>
+  <table>
+    <tr><th style="width:22%">场景</th><th>在纸上做什么</th><th style="width:20%">用到的功能</th></tr>
+    <tr><td>学函数</td><td>写下 <span class="mu"><i>f</i>(<i>x</i>)</span>，看图像、零点、极值点；拖滑条改系数，看图像怎么变。</td><td>函数卡片</td></tr>
+    <tr><td>微积分作业验算</td><td>写下积分、极限、求和，直接得到结果；对写过的函数求导、求定积分，卡片里画出导函数和面积。</td><td>求解</td></tr>
+    <tr><td>平面和立体几何</td><td>手画三角形、椭圆、正方体，变成标准图形；拖节点看边长、角度、面积怎么变；看三视图。</td><td>几何</td></tr>
+    <tr><td>线性代数</td><td>手写矩阵，算乘积、逆矩阵、行列式。</td><td>矩阵</td></tr>
+    <tr><td>整理作业</td><td>按题目分成多份草稿，下次打开回到上次的位置。</td><td>多份草稿</td></tr>
+  </table>
+</section>
+
+<!-- ======================= 2 功能 ======================= -->
+<section class="page">
+  <h2><span class="no">02</span>功能</h2>
+  <p class="muted small">
+    本节截图来自 CI：在 iPad 模拟器上用 <code>-demo</code> 参数摆出的画面（main 分支 05a8037，2026-10-21），笔迹是预置的演示笔迹。画面里操作条上的引擎名和毫秒数是演示数据，不是实测值。</p>
+
+  <h3>函数卡片 <span class="tag">函数</span></h3>
+  <figure>
+    <div class="shot"><img src="img/card.jpg" alt="函数卡片"></div>
+    <figcaption><b>标准式子 + 函数卡片。</b>选中的卡片 <span class="mu"><i>f</i>(<i>x</i>) = <i>x</i><sup>3</sup> − 3<i>x</i></span> 标出零点和极值点，四角、四边和上方圆钮用来改大小、旋转；下面 <span class="mu"><i>g</i>(<i>x</i>) = sin <i>x</i></span> 的卡片收成了小胶囊。</figcaption>
+  </figure>
+  <ul>
+    <li>选「函数」：这段笔迹被识别成 LaTeX，手写淡出，换成标准式子。</li>
+    <li>式子旁挂一张 GeoGebra 式的函数卡片：网格、坐标轴、零点和极值点；拖动平移、双指缩放、双击复位，Pencil 悬停读坐标；滑条可以改系数。</li>
+    <li>点卡片标题栏选中后像 PS 的自由变换：拖四角 / 四边改大小，拖上方圆钮旋转（靠近整 90° 吸附），双指捏合缩放、转动；可以收起成一枚小胶囊。右上角的小眼睛只留图像和坐标轴。</li>
+    <li>点式子出操作条：<b>改式子</b>（手动改 LaTeX）、<b>改笔迹</b>（原笔迹放回纸上，擦改后再双击更新这一条，卡片位置不变）、收起 / 展开图像、删除。拖动式子，卡片跟着走。</li>
+  </ul>
+
+</section>
+
+<section class="page">
+  <h3 style="margin-top:0">求解 <span class="tag">求导 · 积分 · 极限 · 求和 · 解方程</span></h3>
+  <p>写下要算的东西，双击选「求解」，App 直接算出结果并换成标准式子，算出来的部分是绿色的。引用的函数一改（改笔迹、改式子、拖滑条），下面的结果跟着重新算。<b>怎么算：</b>能用符号方法（代入、洛必达、原函数、求和公式）就给准确值；不行再用数值方法（双指数积分、Richardson 外推），并尽量认回 π/4、e − 1、√2、分数这样的形式，认不出就写 ≈ 六位有效数字。全部在 iPad 本机完成，不调用大模型。</p>
+  <figure class="narrow">
+    <div class="shot"><img src="img/reveal.jpg" alt="求导"></div>
+    <figcaption><b>求导。</b>在 <span class="mu"><i>f</i>(<i>x</i>) = <i>x</i><sup>2</sup> − 4</span> 下面写 <span class="mu"><i>f</i> ′(<i>x</i>)</span>，求出 <span class="mu ok">2<i>x</i></span>；<i>f</i> 的卡片里画出导函数（绿色虚线）、极小值点 (0, −4)、水平切线，以及可拖动的切点（红色，标出斜率）。</figcaption>
+  </figure>
+  <figure class="narrow">
+    <div class="shot"><img src="img/solve.jpg" alt="积分、极限、求和"></div>
+    <figcaption><b>积分、极限、求和。</b><span class="mu">∫<span class="ss"><span>2</span><span>0</span></span> <i>f</i>(<i>x</i>) d<i>x</i> = −16/3</span>，<i>f</i> 的卡片里把这块面积涂出来（<i>x</i> 轴下方的部分为红色）；选中的结果上方是操作条。</figcaption>
+  </figure>
+
+  <table>
+    <tr><th style="width:15%">类型</th><th>手写的式子 → App 写回的结果（README 中的例子）</th></tr>
+    <tr><td>求导</td><td class="mu">
+      在函数下面写 <i>f</i> ′(<i>x</i>)、<i>f</i> ″(<i>x</i>)、<i>y</i> ′、<i>f</i> ′(2)；也可以写 d/d<i>x</i> (<i>x</i><sup>2</sup> sin <i>x</i>)</td></tr>
+    <tr><td>积分</td><td class="mu">
+      ∫ <i>x</i>e<sup><i>x</i></sup> d<i>x</i> = <span class="ok"><i>x</i>e<sup><i>x</i></sup> − e<sup><i>x</i></sup> + <i>C</i></span>；∫<span class="ss"><span>1</span><span>0</span></span> <i>x</i><sup>2</sup> d<i>x</i> = <span class="ok">1/3</span>；∫<span class="ss"><span>∞</span><span>0</span></span> e<sup>−<i>x</i></sup> d<i>x</i> = <span class="ok">1</span>；∫<span class="ss"><span>2</span><span>0</span></span> <i>f</i>(<i>x</i>) d<i>x</i> = <span class="ok">−16/3</span>（卡片里涂出面积）</td></tr>
+    <tr><td>极限</td><td class="mu">
+      lim<sub><i>x</i>→0</sub> sin <i>x</i> / <i>x</i> = <span class="ok">1</span>；lim<sub><i>x</i>→∞</sub> (1 + 1/<i>x</i>)<sup><i>x</i></sup> = <span class="ok">e</span>；单侧 <i>x</i> → 0<sup>+</sup>；lim<sub><i>x</i>→3</sub> <i>f</i>(<i>x</i>) 在卡片里标出那一点；左右极限不等、振荡时写明「极限不存在」</td></tr>
+    <tr><td>求和 / 连乘</td><td class="mu">
+      ∑<span class="ss"><span><i>n</i></span><span><i>k</i>=1</span></span> <i>k</i><sup>2</sup> = <span class="ok"><i>n</i>(<i>n</i>+1)(2<i>n</i>+1)/6</span>；∑<span class="ss"><span>∞</span><span><i>n</i>=1</span></span> 1/<i>n</i><sup>2</sup> = <span class="ok">π<sup>2</sup>/6</span>；∏<span class="ss"><span>5</span><span><i>k</i>=1</span></span> <i>k</i> = <span class="ok">120</span>；发散时写明「级数发散」</td></tr>
+    <tr><td>方程 / 取值</td><td class="mu">
+      <i>x</i><sup>2</sup> − 4 = 0 ⇒ <span class="ok"><i>x</i> = ±2</span>；对写过的函数取值 <i>f</i>(3)；不引用函数的完整算式直接算</td></tr>
+  </table>
+
+</section>
+
+<section class="page">
+  <h3 style="margin-top:0">几何 <span class="tag">平面 · 立体 · 三视图 · 变立体</span></h3>
+  <p>画一个图形，双击选「几何」，草图在本机被认成标准图形，画在纸上原来的位置。</p>
+  <figure>
+    <div class="shot"><img src="img/shapes.jpg" alt="平面图形"></div>
+    <figcaption><b>平面图形。</b>手画的正方形、椭圆、直角三角形；选中的椭圆显示焦点 <i>F</i><sub>1</sub>、<i>F</i><sub>2</sub>、两个半轴端点的节点，信息条写出 <i>a</i>、<i>b</i>、<i>c</i>、<i>e</i>，可以「变立体」。</figcaption>
+  </figure>
+  <figure>
+    <div class="shot"><img src="img/solids.jpg" alt="立体图形"></div>
+    <figcaption><b>立体图形。</b>手画的正方体、圆柱、圆锥；选中的正方体有尺寸节点和「拖动旋转」，信息条写出棱长、表面积、体积，一键切换主视 / 左视 / 俯视 / 立体。</figcaption>
+  </figure>
+  <div class="grid2">
+    <div class="box">
+      <h4>能认的图形</h4>
+      <ul class="small">
+        <li><b>平面：</b>线段、三角形（认出等边 / 等腰 / 直角，并把手抖修正成真的直角、真的等腰）、正方形、矩形、菱形、平行四边形、梯形、正多边形、圆、椭圆。接近水平的边会放平。</li>
+        <li><b>立体：</b>正方体 / 长方体、圆柱、圆锥、球、三棱柱、四棱锥、三棱锥。手画的虚线会连成一条。</li>
+        <li>三角形加中线的草图沿用动态几何卡片（中点、重心跟着拖）。</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h4>能做的操作</h4>
+      <ul class="small">
+        <li>拖顶点改形状，图形保持性质（正方形拖角仍是正方形，平行四边形 / 菱形保持性质）；一般三角形随便拖，名字跟着变成「直角三角形」「等腰三角形」……</li>
+        <li>拖上方圆钮旋转（整 15° 吸附）；圆拖边上的点改半径，椭圆拖半轴端点改 <i>a</i>、<i>b</i> 和方向。</li>
+        <li>课本标注：顶点字母、直角记号、等边短线、ABCD-A<sub>1</sub>B<sub>1</sub>C<sub>1</sub>D<sub>1</sub>，看不见的棱画虚线。</li>
+        <li>三视图；平面「变立体」：正方形 → 正方体、四棱锥，矩形 → 长方体，圆 → 圆柱、圆锥、球，三角形 → 三棱柱、三棱锥。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="page">
+  <h3 style="margin-top:0">矩阵 <span class="tag">计算 · 求逆矩阵 · 求行列式</span></h3>
+  <ul>
+    <li>双击时先识别一遍：结果里有矩阵（<code>pmatrix</code>、<code>bmatrix</code> 等）时，菜单多一枚「矩阵」，点开是「计算 / 求逆矩阵 / 求行列式」。</li>
+    <li>「计算」处理这一段里的一个或多个矩阵：加、减、乘、数乘、转置、已经写上的 <span class="mu">^{−1}</span>；求逆、求行列式先把式子算成一个矩阵再做。</li>
+    <li>元素只认常数，用精确分数运算（MathEngine 的有理数），结果写回成标准式子；不是方阵、没有逆时写在式子下面。</li>
+  </ul>
+  <div class="note">矩阵功能目前<b>没有界面截图</b>：CI 摆出的演示画面里没有矩阵这一幕。代码和单元测试在 <code>Packages/InkCore</code>（<code>MatrixMath.swift</code>、<code>MatrixTests.swift</code>）。</div>
+
+  <h3>多份草稿 <span class="tag">草稿画廊</span></h3>
+  <figure>
+    <div class="shot"><img src="img/gallery.jpg" alt="草稿画廊"></div>
+    <figcaption><b>草稿画廊。</b>打开 App 先看到所有草稿的缩略图、名字和修改时间（截图里的草稿名和时间是演示数据）。</figcaption>
+  </figure>
+  <ul>
+    <li>可以新建、搜索、排序；长按重命名、复制、删除。草稿里左上角回画廊，点名字改名。</li>
+    <li>每份草稿自动存在 iPad 上：打开时每 3 秒有变化就存，离开、切到后台时也存。重新打开按 LaTeX 重建式子、导数和求解结果，并滚回上次的位置。</li>
+    <li>纸可以上下滚，写到靠近底下自动接长；式子、卡片、图形跟着笔迹一起滚。台前调度、分屏等窗口化场景下，工具栏收成右上角一枚小胶囊。</li>
+  </ul>
+</section>
+
+<!-- ======================= 3 架构 ======================= -->
+<section class="page">
+  <h2><span class="no">03</span>架构</h2>
+  <p>一段手写从笔尖到纸上结果的路径。函数、求解、矩阵走识别链拿到 LaTeX，再由本机计算；几何直接在本机识别笔画，不经过识别链。</p>
+  <div class="arch"><img src="arch.svg" alt="架构图"></div>
+
+  <table>
+    <tr><th style="width:21%">模块</th><th style="width:25%">目录</th><th>做什么</th></tr>
+    <tr><td>App</td><td><code>app/InkTutor</code></td><td>SwiftUI + PencilKit：画布、笔尖菜单、操作条、草稿画廊和保存，把各模块接起来</td></tr>
+    <tr><td>SceneUI</td><td><code>Packages/SceneUI</code></td><td>函数图像、系数滑条、极值点和切线、导函数、动态几何；公式用 SwiftMath 渲染</td></tr>
+    <tr><td>InkCore</td><td><code>Packages/InkCore</code></td><td>识别器协议和实现（百炼、Server、回放）、降级链、Solver、矩阵、几何草图识别</td></tr>
+    <tr><td>MathEngine</td><td><code>Packages/MathEngine</code></td><td>纯 Swift 数学包：LaTeX 多项式解析、精确分数、求导比对；没有网络、没有模型</td></tr>
+    <tr><td>Server</td><td><code>Server</code></td><td>Mac 上的 Vapor 服务：<code>/recognize</code> 收截图转调 Qwen，带回放</td></tr>
+    <tr><td>MyScript iink</td><td>SDK 4.5.1（Swift 包）</td><td>设备端数学识别；证书和识别资源不进仓库</td></tr>
+  </table>
+</section>
+
+<!-- ======================= 4 AI 实践与端云协同 ======================= -->
+<section class="page">
+  <h2><span class="no">04</span>AI 实践和端云协同</h2>
+
+  <h3>AI 做什么：读懂手写</h3>
+  <div class="grid2">
+    <div class="box">
+      <h4>主识别（云端）：阿里云百炼 Qwen 视觉模型</h4>
+      <ul class="small">
+        <li>上传这一段笔迹的白底截图（PNG），模型只返回 <code>{"latex": …}</code>。</li>
+        <li>先用 <code>qwen3.8-flash</code>（关闭思考），失败换 <code>qwen3-vl-plus</code>。</li>
+        <li>设置里选「直连百炼」时排第一个；也可经 Mac 上的 Server 转调。</li>
+      </ul>
+    </div>
+    <div class="box">
+      <h4>兜底（设备端）：MyScript iink 数学识别</h4>
+      <ul class="small">
+        <li>直接读笔画，收成 LaTeX，笔迹不上传。</li>
+        <li>千问出错、结果为空或没网时接手。</li>
+        <li>iink 每次启动会联网到 license.myscript.com 查一次授权。</li>
+      </ul>
+    </div>
+  </div>
+  <p style="margin-top:3mm">
+    <b>提示词只要求照抄。</b>识别提示词要求「逐字照抄，不做任何数学判断；绝对不要改正、补全、化简或调整项的顺序」。2026-10-19 用手写风格字体（不是真人手写）测试写错的式子 <span class="mu">3<i>x</i><sup>2</sup> − 3<i>x</i></span>：<code>qwen3.8-flash</code>、<code>qwen3.8-max</code>、<code>qwen3-vl-plus</code> 共 8 次，0 次被「改对」；单行耗时 flash 约 1.1–2 秒，max 约 1.7–2.9 秒。真人手写样本还没有系统地测。</p>
+
+  <h3>AI 不做什么：计算</h3>
+  <p>读懂之后的计算全部回到本机：Solver 用符号方法求准确值，不行再用数值积分和外推，并尽量认回 π、e、分数；矩阵用精确分数；几何草图用笔画规则识别拐点和形状。大模型只负责把手写变成 LaTeX，结果不依赖它的推理。</p>
+
+  <h3>哪些在设备上、哪些在云端</h3>
+  <table>
+    <tr><th style="width:30%">环节</th><th style="width:16%">位置</th><th>说明</th></tr>
+    <tr><td>采集笔画</td><td>设备</td><td>PencilKit</td></tr>
+    <tr><td>决定何时识别、识别哪一段</td><td>设备</td><td>双击 Pencil 或点「完成一段」，只处理这一段</td></tr>
+    <tr><td>手写数学 → LaTeX</td><td>云端为主，设备兜底</td><td>百炼 Qwen（云端）→ MyScript（设备）→ Mac 上的 Server（转调 Qwen）</td></tr>
+    <tr><td>求导、积分、极限、求和、解方程、矩阵</td><td>设备</td><td>Solver、MatrixMath、MathEngine</td></tr>
+    <tr><td>几何识别、立体图形、三视图</td><td>设备</td><td>ShapeRecognizer、GeometrySketchRecognizer</td></tr>
+    <tr><td>函数图像、公式渲染</td><td>设备</td><td>SceneUI、SwiftMath</td></tr>
+    <tr><td>草稿保存</td><td>设备</td><td>存在 iPad 本机</td></tr>
+  </table>
+
+</section>
+
+<section class="page">
+  <h3 style="margin-top:0">怎么降级</h3>
+  <ol>
+    <li><b>千问优先（演示用）</b>：设置里选「直连百炼」并填 Key：先用千问；出错或结果为空，换 MyScript（就绪时），再换 Server（填了地址时）。</li>
+    <li><b>其他选项</b>：「自动」是 MyScript 先、再百炼、再 Server；也可以只指定 MyScript、Server 或回放。指定的引擎没配好时按自动的顺序来，不直接退到回放。</li>
+    <li><b>回放</b>：三个引擎都没配置，或在设置里选「回放（断网）」时，按录好的 LaTeX 出结果（按「第几条、改过几轮、这一轮写了几笔」取）。彩排时打开「录制回放」，可以把真识别的结果录下来。Server 端默认在 3 秒没返回或出错时也放它录好的结果。</li>
+    <li><b>认错了</b>：点式子「改式子」手动改 LaTeX，或「改笔迹」重写后再双击。链上的引擎都失败时，界面提示「没认出来」，App 不会自动切到回放。</li>
+  </ol>
+  <div class="note">
+    「不联网也能用」指的是识别之后的计算、作图和保存。MyScript 每次启动要联网查一次授权，没网时 iink 会怎样还没实测；断网时千问用不了，识别链会退到 MyScript；但 MyScript 没网时的表现还没实测，所以会场断网最稳的做法是在设置里切到「回放」。</div>
+
+  <!-- ======================= 5 完成度 ======================= -->
+  <h2 style="margin-top:8mm"><span class="no">05</span>完成度和尚未验证的项</h2>
+  <p>
+    能编译、签名、装到设备上的 Mac 只有一台，演示机是一台 iPad Pro + Pencil Pro。CI 在 main（05a8037）上通过：Linux 上 MathEngine、InkCore、Server 的 <code>swift test</code>，以及 iOS 模拟器编译和截图。</p>
+  <table>
+    <tr><th style="width:30%">功能</th><th style="width:22%">状态</th><th>说明</th></tr>
+    <tr><td>函数（识别 → 标准式子 → 函数卡片）</td><td><span class="st dev">iPad 真机实测</span></td><td>在演示用的 iPad 上跑过</td></tr>
+    <tr><td>求导</td><td><span class="st dev">iPad 真机实测</span></td><td>在演示用的 iPad 上跑过</td></tr>
+    <tr><td>积分、极限、求和、解方程</td><td><span class="st sim">仅模拟器</span></td><td>模拟器编译、截图；还没装到 iPad 上</td></tr>
+    <tr><td>几何（平面、立体、三视图、变立体）</td><td><span class="st sim">仅模拟器</span></td><td>模拟器编译、截图；还没装到 iPad 上</td></tr>
+    <tr><td>矩阵</td><td><span class="st sim">仅模拟器</span></td><td>模拟器编译、单元测试；没有截图，还没装到 iPad 上</td></tr>
+    <tr><td>多份草稿</td><td><span class="st sim">修改后未复测</span></td><td>模拟器截图；提交记录里写了真机上缩略图变白，已修改，修改后的版本还没确认在真机上复测</td></tr>
+    <tr><td>MyScript 实际识别效果</td><td><span class="st no">未系统测</span></td><td>已接入；真人手写的准确率、没网时的表现还没测</td></tr>
+    <tr><td>Qwen 识别</td><td><span class="st no">未系统测</span></td><td>只用手写风格字体测过；真人手写样本还没测</td></tr>
+    <tr><td>Pencil 双击回调、落点、整笔擦除</td><td><span class="st no">记录未填</span></td><td>逐项记录表 <code>docs/device.md</code> 还没填写</td></tr>
+  </table>
+</section>
+
+<section class="page">
+  <h3 style="margin-top:0">已知限制</h3>
+  <ul>
+    <li>矩阵元素只认常数。</li>
+    <li>MathEngine 的多项式部分只支持单变量多项式。Solver 算不了的式子写明原因（例如「暂时算不出来」），认不出准确形式时写 ≈ 小数，不硬给答案。</li>
+    <li>MyScript 证书、数学识别资源和百炼 Key 都不进仓库，换一台设备要重新配置。</li>
+  </ul>
+
+  <h2 style="margin-top:9mm"><span class="no">06</span>团队分工</h2>
+  <div class="team">
+    <div class="box">
+      <h4>P1 · App　<span class="who">RuikAn-n、DogeFFF</span></h4>
+      <p class="small">iPad App：画布、笔尖菜单、草稿；唯一能签名装机的 Mac 在 P1 手上。</p>
+      <div class="dir">app/InkTutor</div>
+    </div>
+    <div class="box">
+      <h4>P2 · 画面</h4>
+      <p class="small">函数图像、系数滑条、导函数、动态几何、公式渲染。</p>
+      <div class="dir">Packages/SceneUI</div>
+    </div>
+    <div class="box">
+      <h4>P3 · 识别与反馈　<span class="who">Interphynity</span></h4>
+      <p class="small">识别链（百炼 Qwen、Server、回放）、提示词与实测、Mac 上的 Server。</p>
+      <div class="dir">Packages/InkCore · Server</div>
+    </div>
+    <div class="box">
+      <h4>P4 · MathEngine　<span class="who">Drkarmic</span></h4>
+      <p class="small">纯 Swift 数学引擎：多项式解析、精确分数、求导比对。</p>
+      <div class="dir">Packages/MathEngine</div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:7mm">源码和运行</h3>
+  <ul>
+    <li><b>App</b>：Xcode 打开 <code>app/InkTutor.xcodeproj</code>。MyScript 证书 <code>MyCertificate.c</code> 放到 <code>app/InkTutor/MyScriptCertificate/</code>（不在仓库里）；没放证书也能编译运行，识别退回其他引擎。百炼 Key、Server 地址在 App 的设置里填，只存在这台 iPad 上。</li>
+    <li><b>Server</b>：<code>cd Server &amp;&amp; swift run InkTutorServer</code>（端口 8080，百炼 Key 从环境变量 <code>DASHSCOPE_API_KEY</code> 或 <code>Server/.secrets/dashscope_key.txt</code> 读）。</li>
+    <li><b>测试</b>：<code>swift test --package-path Packages/MathEngine</code>，InkCore、Server 同理；Linux 上能跑。</li>
+  </ul>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,239 @@
+/* 项目说明 PDF 的版式：A4，Chromium 打印。中文用 Noto Sans/Serif CJK SC（fonts-noto-cjk）。 */
+
+@page {
+  size: A4;
+  margin: 18mm 18mm 18mm 18mm;
+  @bottom-center {
+    content: counter(page) " / " counter(pages);
+    font-family: "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+    font-size: 8.5pt;
+    color: #94a3b8;
+  }
+  @bottom-left {
+    content: "笔迹 AI 家教 · 项目说明";
+    font-family: "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+    font-size: 8.5pt;
+    color: #94a3b8;
+  }
+}
+@page :first {
+  margin: 0;
+  @bottom-center { content: none; }
+  @bottom-left { content: none; }
+}
+
+:root {
+  --ink: #0f172a;
+  --text: #1e293b;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
+  --green: #059669;
+  --amber: #b45309;
+  --amber-soft: #fff7ed;
+  --red: #b91c1c;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+  color: var(--text);
+  font-family: "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+  font-size: 10pt;
+  line-height: 1.62;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+h1, h2, h3 { color: var(--ink); line-height: 1.35; }
+h2 {
+  font-size: 17pt;
+  margin: 0 0 4mm;
+  padding-bottom: 2mm;
+  border-bottom: 1.5pt solid var(--ink);
+  display: flex;
+  align-items: baseline;
+  gap: 3mm;
+}
+h2 .no { color: var(--accent); font-size: 13pt; font-weight: 700; }
+h3 {
+  font-size: 12pt;
+  margin: 5mm 0 2mm;
+  display: flex;
+  align-items: baseline;
+  gap: 2.5mm;
+}
+h3 .tag {
+  font-size: 8pt;
+  font-weight: 500;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 3pt;
+  padding: 0.3mm 2mm;
+}
+p { margin: 0 0 2.5mm; }
+ul, ol { margin: 0 0 2.5mm; padding-left: 5mm; }
+li { margin-bottom: 1mm; }
+b, strong { color: var(--ink); }
+.muted { color: var(--muted); }
+.small { font-size: 8.8pt; }
+.m { font-family: "Latin Modern Math", "STIX Two Math", "DejaVu Serif", serif; font-style: italic; }
+.mu { font-family: "DejaVu Serif", serif; }
+.ok { color: var(--green); font-weight: 700; }
+.mu .ok, .mu.ok { font-weight: 400; }
+/* 积分、求和的上下限：上限在上、下限在下 */
+.ss {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: middle;
+  font-size: 68%;
+  line-height: 1.05;
+  margin: 0 1pt 0 0.5pt;
+  text-align: left;
+}
+
+section.page { break-before: page; }
+.keep { break-inside: avoid; }
+
+/* ---------- 封面 ---------- */
+.cover {
+  width: 210mm;
+  height: 297mm;
+  padding: 26mm 22mm 20mm;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #eef2ff 0%, #ffffff 55%);
+  overflow: hidden;
+}
+.cover .event { font-size: 10pt; color: var(--muted); letter-spacing: 0.5pt; }
+.cover h1 {
+  font-family: "Noto Serif CJK SC", "Noto Serif SC", serif;
+  font-size: 34pt;
+  font-weight: 900;
+  margin: 10mm 0 3mm;
+  letter-spacing: 1pt;
+}
+.cover .sub {
+  font-family: "Noto Serif CJK SC", "Noto Serif SC", serif;
+  font-size: 19pt;
+  color: var(--accent);
+  font-weight: 700;
+  margin: 0 0 8mm;
+}
+.cover .track {
+  display: inline-block;
+  font-size: 10.5pt;
+  color: #ffffff;
+  background: var(--accent);
+  border-radius: 20pt;
+  padding: 1mm 5mm;
+  align-self: flex-start;
+}
+.cover .one {
+  font-size: 12.5pt;
+  line-height: 1.8;
+  margin: 8mm 0 9mm;
+  color: var(--ink);
+}
+.cover .hero {
+  border: 0.8pt solid var(--line);
+  border-radius: 4mm;
+  overflow: hidden;
+  box-shadow: 0 2mm 6mm rgba(15, 23, 42, 0.10);
+}
+.cover .hero img { display: block; width: 100%; height: auto; }
+.cover .hero-cap { font-size: 8.5pt; color: var(--muted); margin-top: 2mm; }
+.cover .foot {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4mm;
+  border-top: 0.8pt solid var(--line);
+  padding-top: 4mm;
+  font-size: 9pt;
+}
+.cover .foot .k { color: var(--muted); font-size: 8pt; }
+
+/* ---------- 截图 ---------- */
+figure { margin: 3mm 0 4mm; break-inside: avoid; }
+figure .shot {
+  border: 0.8pt solid var(--line);
+  border-radius: 2.5mm;
+  overflow: hidden;
+}
+figure img { display: block; width: 100%; height: auto; }
+figure.narrow { width: 82%; margin-left: auto; margin-right: auto; }
+figcaption { font-size: 8.8pt; color: var(--muted); margin-top: 1.5mm; line-height: 1.5; }
+figcaption b { color: var(--text); }
+
+/* ---------- 卡片、表格 ---------- */
+.flow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3mm;
+  margin: 3mm 0 4mm;
+}
+.flow > div {
+  background: var(--accent-soft);
+  border-radius: 2.5mm;
+  padding: 2.5mm 3mm;
+  font-size: 9.2pt;
+  line-height: 1.5;
+}
+.flow .n { color: var(--accent); font-weight: 700; font-size: 11pt; display: block; margin-bottom: 1mm; }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; }
+.box {
+  border: 0.8pt solid var(--line);
+  border-radius: 2.5mm;
+  padding: 3mm 4mm;
+  break-inside: avoid;
+}
+.box h4 { margin: 0 0 1.5mm; font-size: 10.5pt; color: var(--ink); }
+.box p:last-child, .box ul:last-child { margin-bottom: 0; }
+.note {
+  background: var(--amber-soft);
+  border-left: 2.5pt solid #f59e0b;
+  border-radius: 1.5mm;
+  padding: 2.5mm 4mm;
+  font-size: 9.2pt;
+  margin: 3mm 0;
+  break-inside: avoid;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  line-height: 1.5;
+  margin: 2mm 0 4mm;
+  break-inside: avoid;
+}
+th, td { border-bottom: 0.6pt solid var(--line); padding: 1.8mm 2.2mm; text-align: left; vertical-align: top; }
+th { background: #f8fafc; color: var(--ink); font-weight: 700; border-bottom: 1pt solid #cbd5e1; }
+td.c { white-space: nowrap; }
+
+.st { display: inline-block; border-radius: 3pt; padding: 0 1.8mm; font-size: 8.3pt; font-weight: 700; white-space: nowrap; }
+.st.dev { background: #dcfce7; color: #166534; }
+.st.sim { background: #fef3c7; color: #92400e; }
+.st.no  { background: #fee2e2; color: #991b1b; }
+
+.arch { margin: 2mm 0 3mm; text-align: center; }
+.arch img { width: 84%; height: auto; }
+
+.team { display: grid; grid-template-columns: 1fr 1fr; gap: 3.5mm; }
+.team .box .who { color: var(--accent); font-weight: 700; }
+.team .box .dir { font-family: "DejaVu Sans Mono", Consolas, monospace; font-size: 8.3pt; color: var(--muted); }
+
+code {
+  font-family: "DejaVu Sans Mono", Consolas, monospace;
+  font-size: 8.6pt;
+  background: #f1f5f9;
+  border-radius: 2pt;
+  padding: 0 0.8mm;
+  white-space: nowrap;
+}
