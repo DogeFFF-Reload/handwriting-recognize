@@ -112,6 +112,99 @@ final class ShapeRecognizerTests: XCTestCase {
         XCTAssertEqual(Figure.polygon(p).facts.first, "长 7.5")
     }
 
+    /// 一笔一条边的时候，真手画的边在顶点处要么画过头（交叉），要么没碰上（留缝）。
+    private func side(_ a: CGPoint, _ b: CGPoint, extend e: CGFloat) -> [CGPoint] {
+        let d = Geo.dist(a, b)
+        let ux = (b.x - a.x) / d, uy = (b.y - a.y) / d
+        return line(CGPoint(x: a.x - ux * e, y: a.y - uy * e), CGPoint(x: b.x + ux * e, y: b.y + uy * e))
+    }
+
+    func testTriangleInThreeStrokesWithOvershootOrGaps() throws {
+        // 不等边的锐角三角形（不会被修成等腰、直角），大的和小的
+        for scale: CGFloat in [1, 0.45] {
+            let tri = [CGPoint(x: 200, y: 90), CGPoint(x: 80, y: 330), CGPoint(x: 420, y: 290)].map {
+                CGPoint(x: 80 + ($0.x - 80) * scale, y: 90 + ($0.y - 90) * scale)
+            }
+            for e: CGFloat in [-18, -8, 0, 12, 28] {
+                let strokes = (0..<3).map { s(side(tri[$0], tri[($0 + 1) % 3], extend: e), amp: 2) }
+                let figs = recognize(strokes)
+                XCTAssertEqual(figs.map(\.name), ["锐角三角形"], "scale \(scale) extend \(e)")
+                // 顶点是两条边的交点，不是笔画端点的平均
+                if case .polygon(let p)? = figs.first {
+                    let top = p.vertices.min { $0.y < $1.y }!
+                    XCTAssertEqual(top.x, tri[0].x, accuracy: 5, "scale \(scale) extend \(e)")
+                    XCTAssertEqual(top.y, tri[0].y, accuracy: 5, "scale \(scale) extend \(e)")
+                }
+            }
+        }
+    }
+
+    func testMultiStrokeSquaresAndRightTriangle() throws {
+        let sq = [CGPoint(x: 100, y: 100), CGPoint(x: 300, y: 100), CGPoint(x: 300, y: 300), CGPoint(x: 100, y: 300)]
+        // 四笔，每笔都画过头
+        XCTAssertEqual(only((0..<4).map { s(side(sq[$0], sq[($0 + 1) % 4], extend: 20), amp: 2) })?.name, "正方形")
+        // 两笔：两个「L」
+        XCTAssertEqual(only([s(path([sq[3], sq[0], sq[1]], closed: false), amp: 2),
+                             s(path([sq[1], sq[2], sq[3]], closed: false), amp: 2)])?.name, "正方形")
+        // 直角三角形三笔，竖边和底边交叉
+        let rt = [CGPoint(x: 100, y: 100), CGPoint(x: 100, y: 320), CGPoint(x: 360, y: 320)]
+        XCTAssertEqual(only((0..<3).map { s(side(rt[$0], rt[($0 + 1) % 3], extend: 15), amp: 2) })?.name, "直角三角形")
+    }
+
+    /// 一笔一条边、大小不一、每一端画过头或留缝都不一样：40 次都要认成一个多边形。
+    func testRandomMultiStrokePolygons() throws {
+        func r(_ lo: CGFloat, _ hi: CGFloat) -> CGFloat { lo + (noise() + 0.5) * (hi - lo) }
+        func stroke(_ a: CGPoint, _ b: CGPoint) -> InkStroke {
+            let d = Geo.dist(a, b)
+            let ux = (b.x - a.x) / d, uy = (b.y - a.y) / d
+            let e0 = r(-15, 25), e1 = r(-15, 25)
+            return s(line(CGPoint(x: a.x - ux * e0, y: a.y - uy * e0), CGPoint(x: b.x + ux * e1, y: b.y + uy * e1)), amp: 2)
+        }
+        for k in 1...40 {
+            seed = UInt64(k) * 104_729
+            let size = r(70, 300), c = CGPoint(x: 500, y: 500)
+            // 三角形：三个顶点随便取，但别太扁
+            let tri = (0..<3).map { (i: Int) -> CGPoint in
+                let t = CGFloat(i) * 2 * CGFloat.pi / 3 + r(-0.35, 0.35)
+                return polar(c, size * r(0.75, 1.0), t)
+            }
+            let t = recognize((0..<3).map { stroke(tri[$0], tri[($0 + 1) % 3]) })
+            XCTAssertEqual(t.count, 1, "trial \(k) triangle size \(Int(size)): \(t.map(\.name))")
+            XCTAssertTrue(t.first?.name.hasSuffix("三角形") ?? false, "trial \(k)")
+            let sq = [CGPoint(x: c.x - size, y: c.y - size), CGPoint(x: c.x + size, y: c.y - size),
+                      CGPoint(x: c.x + size, y: c.y + size), CGPoint(x: c.x - size, y: c.y + size)]
+            XCTAssertEqual(recognize((0..<4).map { stroke(sq[$0], sq[($0 + 1) % 4]) }).map(\.name), ["正方形"], "trial \(k) size \(Int(size))")
+            let rect = [CGPoint(x: c.x - size, y: c.y - size / 2), CGPoint(x: c.x + size, y: c.y - size / 2),
+                        CGPoint(x: c.x + size, y: c.y + size / 2), CGPoint(x: c.x - size, y: c.y + size / 2)]
+            XCTAssertEqual(recognize((0..<4).map { stroke(rect[$0], rect[($0 + 1) % 4]) }).map(\.name), ["矩形"], "trial \(k) size \(Int(size))")
+        }
+    }
+
+    /// 一笔一条边，每条边都画得有点弯（中间鼓出 8%～10%）。
+    func testTriangleWithBowedSides() throws {
+        let tri = [CGPoint(x: 200, y: 90), CGPoint(x: 80, y: 330), CGPoint(x: 420, y: 290)]
+        let strokes = (0..<3).map { (k: Int) -> InkStroke in
+            let a = tri[k], b = tri[(k + 1) % 3]
+            let d = Geo.dist(a, b)
+            let nx = -(b.y - a.y) / d, ny = (b.x - a.x) / d
+            let bow: CGFloat = (k == 1 ? 0.1 : 0.08) * d
+            var pts: [CGPoint] = []
+            for i in 0...30 {
+                let t = CGFloat(i) / 30
+                let off = bow * 4 * t * (1 - t)
+                pts.append(CGPoint(x: a.x + (b.x - a.x) * t + nx * off, y: a.y + (b.y - a.y) * t + ny * off))
+            }
+            return s(pts, amp: 1.5)
+        }
+        XCTAssertEqual(recognize(strokes).map(\.name), ["锐角三角形"])
+    }
+
+    func testCircleInTwoArcs() throws {
+        let c = CGPoint(x: 300, y: 300)
+        let figs = recognize([s(arc(c, 100, 98, from: -0.2, to: CGFloat.pi + 0.1)), s(arc(c, 100, 98, from: CGFloat.pi + 0.15, to: 2 * CGFloat.pi - 0.15))])
+        XCTAssertEqual(figs.map(\.name), ["圆"])
+    }
+
     func testRightTriangleIsSnapped() throws {
         let a = CGPoint(x: 100, y: 100), b = CGPoint(x: 104, y: 300), c = CGPoint(x: 360, y: 300)
         guard case .polygon(let p)? = only([s(path([a, b, c]))]) else { return XCTFail() }

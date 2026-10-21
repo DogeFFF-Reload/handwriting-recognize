@@ -552,28 +552,64 @@ public enum ShapeRecognizer {
         }
         var g = Graph()
         guard !segs.isEmpty else { return g }
-        let lens = segs.map { Geo.dist($0.0, $0.1) }.sorted()
-        let tol = min(max(0.16 * lens[lens.count / 2], 10), 36)
-        var counts: [Int] = []
-        func node(_ p: CGPoint) -> Int {
-            if let k = g.nodes.indices.min(by: { Geo.dist(g.nodes[$0], p) < Geo.dist(g.nodes[$1], p) }), Geo.dist(g.nodes[k], p) < tol {
-                let c = CGFloat(counts[k])
-                g.nodes[k] = CGPoint(x: (g.nodes[k].x * c + p.x) / (c + 1), y: (g.nodes[k].y * c + p.y) / (c + 1))
-                counts[k] += 1
-                return k
+        let n = segs.count
+        let lens = segs.map { Geo.dist($0.0, $0.1) }
+        let sortedLens = lens.sorted()
+        let tol = min(max(0.16 * sortedLens[n / 2], 10), 36)
+        // 每条线的两端编号 2k、2k+1，并查集把同一个顶点的端合在一起
+        var parent = Array(0..<(2 * n))
+        func find(_ x: Int) -> Int {
+            var r = x
+            while parent[r] != r {
+                parent[r] = parent[parent[r]]
+                r = parent[r]
             }
-            g.nodes.append(p)
-            counts.append(1)
-            return g.nodes.count - 1
+            return r
         }
-        for (a, b, dashed, i) in segs {
-            let x = node(a), y = node(b)
-            g.used.insert(i)
+        func union(_ x: Int, _ y: Int) {
+            let a = find(x), b = find(y)
+            if a != b { parent[a] = b }
+        }
+        func end(_ e: Int) -> CGPoint { e % 2 == 0 ? segs[e / 2].0 : segs[e / 2].1 }
+        var anchors: [Int: [CGPoint]] = [:]
+        // 1. 端点挨得近
+        for i in 0..<(2 * n) {
+            for j in (i + 1)..<(2 * n) where i / 2 != j / 2 && Geo.dist(end(i), end(j)) < tol { union(i, j) }
+        }
+        // 2. 一笔一条边：画过头（交叉）或者没碰上（留缝）。两条不平行的线，交点落在各自某一端附近，就在交点处相接
+        for i in 0..<n {
+            for j in (i + 1)..<n {
+                let (a1, b1, _, _) = segs[i], (a2, b2, _, _) = segs[j]
+                guard Geo.directionGap(a1, b1, a2, b2) >= 20, let x = intersect(a1, b1, a2, b2) else { continue }
+                let ei = Geo.dist(x, a1) <= Geo.dist(x, b1) ? 2 * i : 2 * i + 1
+                let ej = Geo.dist(x, a2) <= Geo.dist(x, b2) ? 2 * j : 2 * j + 1
+                // 交点离这一端不远（线长的 25%，最多 36 pt）：中线落在对边中间（T 字形）、
+                // 四棱锥的侧棱延长后碰到底边，都不算相接
+                let reachI = max(tol, min(0.25 * lens[i], 36)), reachJ = max(tol, min(0.25 * lens[j], 36))
+                guard Geo.dist(x, end(ei)) <= reachI, Geo.dist(x, end(ej)) <= reachJ else { continue }
+                union(ei, ej)
+                anchors[ei, default: []].append(x)
+                anchors[ej, default: []].append(x)
+            }
+        }
+        // 顶点位置：有交点就取交点的平均（准），否则取端点的平均
+        var nodeOf: [Int: Int] = [:]
+        var groups: [Int: [Int]] = [:]
+        for e in 0..<(2 * n) { groups[find(e), default: []].append(e) }
+        for root in groups.keys.sorted() {
+            let members = groups[root]!
+            let pins = members.flatMap { anchors[$0] ?? [] }
+            g.nodes.append(Geo.mean(pins.isEmpty ? members.map(end) : pins))
+            nodeOf[root] = g.nodes.count - 1
+        }
+        for (k, s) in segs.enumerated() {
+            let x = nodeOf[find(2 * k)]!, y = nodeOf[find(2 * k + 1)]!
+            g.used.insert(s.3)
             guard x != y else { continue }
-            if let k = g.edges.firstIndex(where: { ($0.0 == x && $0.1 == y) || ($0.0 == y && $0.1 == x) }) {
-                g.edges[k].2 = g.edges[k].2 && dashed
+            if let i = g.edges.firstIndex(where: { ($0.0 == x && $0.1 == y) || ($0.0 == y && $0.1 == x) }) {
+                g.edges[i].2 = g.edges[i].2 && s.2
             } else {
-                g.edges.append((x, y, dashed))
+                g.edges.append((x, y, s.2))
             }
         }
         return g
@@ -669,7 +705,17 @@ public enum ShapeRecognizer {
 
     // MARK: - 平面图形
 
-    static func planar(_ prims: [Prim]) -> [Figure] {
+    static func planar(_ input: [Prim]) -> [Figure] {
+        // 平面图形里，没拉直的边（中间鼓出来不到弦长 12%）也当直线：一笔一条边时手常常画得有点弯
+        let prims = input.map { p -> Prim in
+            guard p.kind == .arc, let a = p.points.first, let b = p.points.last else { return p }
+            let chord = Geo.dist(a, b), len = pathLength(p.points)
+            guard chord > 12, len > 0, chord / len >= 0.9 else { return p }
+            let bulge = p.points.map { GeometrySketchRecognizer.pointLineDistance($0, a, b) }.max() ?? 0
+            guard bulge <= 0.12 * chord else { return p }
+            let (x, y) = fitLine(p.points)
+            return .line(x, y)
+        }
         var out: [Figure] = []
         for p in prims {
             switch p.kind {
@@ -681,6 +727,7 @@ public enum ShapeRecognizer {
                 break
             }
         }
+        out += arcEllipses(prims.filter { $0.kind == .arc })
         // 几笔直线：首尾相接围成一圈的是多边形，其余是线段
         let lineIdx = prims.indices.filter { prims[$0].kind == .line && prims[$0].length >= 8 }
         guard !lineIdx.isEmpty else { return out }
@@ -716,6 +763,36 @@ public enum ShapeRecognizer {
                 }
             }
             for e in edges { out.append(.segment(g.nodes[e.0], g.nodes[e.1])) }
+        }
+        return out
+    }
+
+    /// 分几笔画的圆、椭圆（两段弧、三段弧……）：挨在一起的弧放在一起拟合，
+    /// 拟合得好、又绕了大半圈（参数角覆盖七成以上）才算。
+    static func arcEllipses(_ arcs: [Prim]) -> [Figure] {
+        guard !arcs.isEmpty else { return [] }
+        // 外框（各外扩自身大小的 20%）相交的弧连成一组
+        var group = Array(0..<arcs.count)
+        func root(_ x: Int) -> Int { group[x] == x ? x : root(group[x]) }
+        let boxes = arcs.map { a -> CGRect in
+            let b = a.bounds
+            return b.insetBy(dx: -0.2 * max(b.width, 10), dy: -0.2 * max(b.height, 10))
+        }
+        for i in arcs.indices {
+            for j in arcs.indices where j > i && boxes[i].intersects(boxes[j]) { group[root(i)] = root(j) }
+        }
+        var out: [Figure] = []
+        for r in Set(arcs.indices.map(root)) {
+            let pts = arcs.indices.filter { root($0) == r }.flatMap { arcs[$0].points }
+            guard pts.count >= 12, let (e, err) = fitEllipse(pts), err < 0.07 else { continue }
+            var bins = Set<Int>()
+            for p in pts {
+                let d = CGPoint(x: p.x - e.center.x, y: p.y - e.center.y)
+                let xu = (d.x * e.u.x + d.y * e.u.y) / e.a, yv = (d.x * e.v.x + d.y * e.v.y) / e.b
+                let t = atan2(Double(yv), Double(xu)) + Double.pi
+                bins.insert(min(Int(t / (2 * Double.pi) * 24), 23))
+            }
+            if bins.count >= 17 { out.append(.ellipse(beautify(e))) }
         }
         return out
     }

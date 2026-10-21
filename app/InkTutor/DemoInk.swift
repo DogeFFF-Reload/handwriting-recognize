@@ -89,6 +89,13 @@ enum DemoInk {
         }
     }
 
+    /// 线段两头各伸长 d（负数是缩短，留缝）：手画一笔一条边时常见的画过头 / 没碰上。
+    static func extend(_ a: CGPoint, _ b: CGPoint, by d: CGFloat) -> (CGPoint, CGPoint) {
+        let len = max(hypot(b.x - a.x, b.y - a.y), 1)
+        let ux: CGFloat = (b.x - a.x) / len, uy: CGFloat = (b.y - a.y) / len
+        return (CGPoint(x: a.x - ux * d, y: a.y - uy * d), CGPoint(x: b.x + ux * d, y: b.y + uy * d))
+    }
+
     /// 椭圆弧（几何演示用）。
     static func arc(_ c: CGPoint, _ a: CGFloat, _ b: CGFloat, from t0: CGFloat = 0, to t1: CGFloat = 2 * .pi, n: Int = 96) -> [CGPoint] {
         (0...n).map { (i: Int) -> CGPoint in

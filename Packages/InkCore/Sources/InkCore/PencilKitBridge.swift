@@ -29,12 +29,14 @@ public enum PencilKitBridge {
         }
     }
 
-    public static func strokes(from drawing: PKDrawing, ids: inout IDTable, sampleStep: Int = 2) -> [InkStroke] {
+    /// `spacing`：沿着笔画实际画出来的那条线每隔多少 pt 取一个点。
+    /// （PKStrokePath 本身存的是样条的控制点，快速画的直线可能只有两三个，弯的地方控制点还不在线上，几何识别要用线上的点。）
+    public static func strokes(from drawing: PKDrawing, ids: inout IDTable, spacing: CGFloat = 3) -> [InkStroke] {
         drawing.strokes.map { s in
-            let n = s.path.count
-            let pts: [CGPoint] = s.path.enumerated()
-                .filter { $0.offset % max(1, sampleStep) == 0 || $0.offset == n - 1 }
-                .map { $0.element.location.applying(s.transform) }
+            var pts: [CGPoint] = s.path.interpolatedPoints(by: .distance(spacing)).map { $0.location.applying(s.transform) }
+            if pts.count < 2 {
+                pts = s.path.map { $0.location.applying(s.transform) }
+            }
             return InkStroke(id: ids.id(for: s), bounds: s.renderBounds, createdAt: s.path.creationDate, points: pts)
         }
     }

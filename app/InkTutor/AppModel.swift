@@ -1029,10 +1029,18 @@ extension AppModel {
             let sq = offsets.map { (o: CGPoint) -> CGPoint in
                 CGPoint(x: c.x + o.x * ct - o.y * st, y: c.y + o.x * st + o.y * ct)
             }
-            draw([zip(sq, sq.dropFirst()).flatMap { DemoInk.segment($0.0, $0.1) }])
+            // 正方形四笔画，角上留了缝；三角形三笔画，每笔都画过了头：一样认成一个图形
+            draw(zip(sq, sq.dropFirst()).map { pair -> [CGPoint] in
+                let (p, q) = DemoInk.extend(pair.0, pair.1, by: -9)
+                return DemoInk.segment(p, q)
+            })
             draw([DemoInk.arc(CGPoint(x: 640, y: y), 160, 88, from: 0.2, to: 0.2 + 2.05 * .pi)])
             let a = CGPoint(x: 940, y: y - 120), b = CGPoint(x: 944, y: y + 110), t = CGPoint(x: 1180, y: y + 108)
-            draw([DemoInk.segment(a, b) + DemoInk.segment(b, t) + DemoInk.segment(t, a)])
+            let sides: [(CGPoint, CGPoint)] = [(a, b), (b, t), (t, a)]
+            draw(sides.map { e -> [CGPoint] in
+                let (p, q) = DemoInk.extend(e.0, e.1, by: 16)
+                return DemoInk.segment(p, q)
+            })
             if let e = shapes.first(where: { if case .ellipse = $0.figure { return true }; return false }) { selection = .shape(e.id) }
         } else {
             // 正方体：前后两个正方形 + 四条连线
