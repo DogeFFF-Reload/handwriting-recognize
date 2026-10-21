@@ -34,7 +34,7 @@ struct BoardOverlay: View {
             ForEach(app.busy) { BusyOverlay(job: $0) }
 
             if let menu = app.menu {
-                SegmentMenu(state: menu, boardSize: app.boardSize, topInset: app.topInset) { app.choose($0) }
+                SegmentMenu(state: menu, boardSize: app.boardSize, topInset: app.topInset, onChoose: { app.choose($0) }, onMatrix: { app.chooseMatrix($0) })
                     .transition(.opacity)
             }
 

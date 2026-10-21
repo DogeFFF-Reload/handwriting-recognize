@@ -97,7 +97,7 @@ struct TopBar: View {
             .buttonStyle(.plain)
             .hoverEffect(.highlight)
             .disabled(!app.hasInk)
-            .accessibilityHint("Pencil 双击没反应时用它：在最后一笔旁弹出函数 / 求解 / 几何")
+            .accessibilityHint("Pencil 双击没反应时用它：在最后一笔旁弹出函数 / 求解 / 几何，认出矩阵时还有矩阵")
             divider
             IconButton(systemImage: "trash", help: "清空", enabled: app.hasInk || !app.functions.isEmpty || !app.geometries.isEmpty) {
                 confirmClear = true
