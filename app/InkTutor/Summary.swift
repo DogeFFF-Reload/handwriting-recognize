@@ -46,7 +46,7 @@ final class SummaryCenter {
 
     /// 点了「总结内容」：有百炼 Key 就交给 qwen3.8-max，没有就拼本地要点。
     func summarize(_ id: UUID) {
-        guard phases[id] != .working, let digest = digest(id) else { return }
+        guard phases[id] != .working, let digest = page(id) else { return }
         let key = Self.apiKey
         guard !key.isEmpty else {
             library.saveSummary(id, NoteSummarizer.local(digest))
@@ -68,13 +68,13 @@ final class SummaryCenter {
 
     /// 模型没连上时退一步：按纸上的式子拼一份本地要点。
     func useLocal(_ id: UUID) {
-        guard let digest = digest(id) else { return }
+        guard let digest = page(id) else { return }
         library.saveSummary(id, NoteSummarizer.local(digest))
         phases[id] = .done
     }
 
     /// 上次存盘时纸上的东西，名字用草稿现在的名字。以前的草稿没有存过：只知道纸上有手写。
-    private func digest(_ id: UUID) -> NoteDigest? {
+    private func page(_ id: UUID) -> NoteDigest? {
         guard let meta = library.meta(id) else { return nil }
         var d = library.digest(id) ?? NoteDigest(title: meta.title, lines: [], hasLooseInk: true)
         d.title = meta.title

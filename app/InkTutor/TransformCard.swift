@@ -220,18 +220,23 @@ private struct TransformPlane: View {
     private func drag(frame f: PlaneFrame, size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { g in
-                if dragging == nil {
+                // 按下的那一刻定好拖哪一支（离箭头尖都远就不管：不是在拖箭头）
+                let arrow: Arrow
+                if let held = dragging {
+                    arrow = held
+                } else {
                     let tipI = f.point(map.a, map.c, in: size), tipJ = f.point(map.b, map.d, in: size)
                     let di = hypot(tipI.x - g.startLocation.x, tipI.y - g.startLocation.y)
                     let dj = hypot(tipJ.x - g.startLocation.x, tipJ.y - g.startLocation.y)
                     guard min(di, dj) < 34 else { return }
-                    dragging = di <= dj ? .i : .j
+                    arrow = di <= dj ? .i : .j
+                    dragging = arrow
                     frozen = f
                 }
                 let v = f.value(at: g.location, in: size)
                 let x = Self.snap(v.x), y = Self.snap(v.y)
                 var m = map
-                if dragging == .i {
+                if arrow == .i {
                     m.a = x
                     m.c = y
                 } else {
