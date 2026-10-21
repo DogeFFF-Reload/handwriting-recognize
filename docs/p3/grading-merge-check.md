@@ -93,4 +93,10 @@ iOS App 在 Linux 上编不了。我只做了静态核对：批改用到的 `The
 
 ## CI 结果
 
-（推送后补。）
+- 推送 `bce9756`（带 [mac]）后触发了 [run 50](https://github.com/DogeFFF-Reload/handwriting-recognize/actions/runs/39609909841)：unit、server、ios-build 三个任务都在 2–3 秒内失败，`runner_id=0`、没有日志。和 13:11 UTC 以来其他分支的情况一样，**没分到机器，不是代码的问题，也就没有编译结果**。
+- 所以「整个 App 能不能编过」目前**没有任何验证**。Linux 单测的结果见上文，是在本地跑的。
+- 补这份结果的提交同样带 [mac]：CI 恢复以后再推一个提交、或者手动 Run workflow，就能编到这棵树。
+- CI 恢复之前，只能在那台 Mac 上编。命令和 CI 一样：
+  `xcodebuild -project app/InkTutor.xcodeproj -scheme InkTutor -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`。
+  只合批改的话，先 `git checkout 84d66a3` 再编。
+- 仓库所有者需要到 GitHub → Settings → Billing / Actions 看一下为什么不分配机器：私有仓库，macOS 分钟按 10 倍计费，额度很可能用完了。
