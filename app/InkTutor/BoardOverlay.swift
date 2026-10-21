@@ -24,9 +24,14 @@ struct BoardOverlay: View {
             ForEach(app.geometries) { item in
                 GeometryCard(item: item, app: app)
             }
-            // 卡片画在所有式子上面
+            // 卡片画在所有式子上面（函数图像；2×2 矩阵「看变换」）
             ForEach(app.functions) { item in
                 FunctionCard(item: item, app: app)
+                TransformCard(item: item, app: app)
+            }
+            // 「检查」的圈和提示画在学生自己的笔迹上
+            ForEach(app.checks) { item in
+                CheckMarks(item: item, app: app)
             }
 
             // 式子的操作条画在卡片上面，不会被挂在右上角的卡片挡住
@@ -200,7 +205,10 @@ struct FormulaActionBar: View {
         HStack(spacing: 2) {
             BarButton(title: "改式子", systemImage: "character.cursor.ibeam") { app.editingFormula = item.id }
             BarButton(title: "改笔迹", systemImage: "scribble.variable") { app.restoreInk(item) }
-            if item.graph != nil {
+            if let host = item.mergedInto.flatMap({ id in app.functions.first { $0.id == id } }) {
+                // 画在别的函数的卡片里：可以拆出来单独作图
+                BarButton(title: "从 \(host.name)(x) 的图里拿出来", systemImage: "rectangle.split.2x1") { app.unmerge(item) }
+            } else if item.graph != nil || item.linearMap != nil {
                 BarButton(title: item.card.minimized ? "展开图像" : "收起图像",
                           systemImage: item.card.minimized ? "chart.xyaxis.line" : "rectangle.compress.vertical") {
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { item.card.minimized.toggle() }
@@ -253,6 +261,217 @@ private struct BarButton: View {
     }
 }
 
+// MARK: - 检查这一步
+
+/// 「检查」的结果画在学生自己的笔迹上：有问题的项一个红圈（像老师批改那样），下面一枚小条「这里再看看 · 提示」；
+/// 提示由学生自己点开，一级一级给（想一想 → 规则 → 答案）。全对时行尾一个绿勾。改过以后圈变淡，等着再检查。
+struct CheckMarks: View {
+    var item: CheckItem
+    var app: AppModel
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if item.result.ok {
+                okBadge
+                    .scaleEffect(app.compact ? 0.86 : 1, anchor: .leading)
+                    .pinned(.leading, at: CGPoint(x: item.bounds.maxX + 14, y: item.bounds.midY))
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            } else {
+                ForEach(Array(item.result.issues.enumerated()), id: \.offset) { i, issue in
+                    ring(issue.box, number: item.result.issues.count > 1 ? i + 1 : nil, focused: item.focus == i)
+                }
+                panel
+                    .scaleEffect(app.compact ? 0.86 : 1, anchor: .topLeading)
+                    .pinned(.topLeading, at: CGPoint(x: item.bounds.minX, y: item.bounds.maxY + 14))
+                    .transition(.opacity.combined(with: .offset(y: -4)))
+            }
+        }
+    }
+
+    /// 红圈：比错项的框大一圈，稍微歪一点，像手画的。
+    private func ring(_ box: CGRect, number: Int?, focused: Bool) -> some View {
+        let r = box.insetBy(dx: -box.width * 0.16 - 4, dy: -box.height * 0.2 - 4)
+        return ZStack(alignment: .topTrailing) {
+            Ellipse()
+                .stroke(Theme.wrong.opacity(item.stale ? 0.28 : 0.9), style: StrokeStyle(lineWidth: focused ? 3 : 2.4, lineCap: .round))
+                .rotationEffect(.degrees(-3))
+            if let number {
+                Text("\(number)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(width: 18, height: 18)
+                    .background(Theme.wrong.opacity(item.stale ? 0.4 : 1), in: Circle())
+                    .offset(x: 4, y: -4)
+            }
+        }
+        .frame(width: r.width, height: r.height)
+        .position(x: r.midX, y: r.midY)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder private var panel: some View {
+        let count = item.result.issues.count
+        if item.stale {
+            HStack(spacing: 8) {
+                Image(systemName: "pencil.and.scribble").foregroundStyle(Theme.accent)
+                Text("改好了再双击笔身，选「检查」").font(.footnote)
+                closeButton
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 4)
+            .frame(height: 34)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.hairline))
+        } else if let i = item.focus, item.result.issues.indices.contains(i) {
+            HintCard(item: item, index: i, app: app)
+        } else {
+            // 只指出位置：看不看提示由学生自己决定
+            HStack(spacing: 8) {
+                Label(count == 1 ? "这里再看看" : "有 \(count) 处要再看看", systemImage: "exclamationmark.circle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.wrong)
+                Button {
+                    app.revealHint(item, at: 0)
+                } label: {
+                    Label("提示", systemImage: "lightbulb")
+                        .font(.footnote.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .background(Theme.accent.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .hoverEffect(.highlight)
+                closeButton
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 4)
+            .frame(height: 36)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.wrong.opacity(0.25)))
+            .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+        }
+    }
+
+    private var okBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(Theme.ok)
+            Text("这一步对了")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Theme.ok)
+            if !item.stale {
+                Button("收成式子") { app.adopt(item) }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                    .padding(.leading, 4)
+                    .hoverEffect(.highlight)
+            }
+            closeButton
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 4)
+        .frame(height: 34)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.ok.opacity(0.3)))
+        .opacity(item.stale ? 0.5 : 1)
+    }
+
+    private var closeButton: some View {
+        Button {
+            app.dismiss(item)
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .bold))
+                .frame(width: 26, height: 26)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel("不看了")
+    }
+}
+
+/// 一处问题的提示：已经打开的几级一行一行列出来，下面是「再给一点提示」或「看答案」。
+private struct HintCard: View {
+    var item: CheckItem
+    var index: Int
+    var app: AppModel
+
+    private static let levelNames = ["想一想", "规则", "答案"]
+
+    var body: some View {
+        let issue = item.result.issues[index]
+        let level = item.levels[index]
+        let count = item.result.issues.count
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 6) {
+                Image(systemName: "lightbulb.fill").foregroundStyle(Theme.warn)
+                Text(count > 1 ? "第 \(index + 1) 处（共 \(count) 处）" : "提示")
+                    .font(.footnote.weight(.semibold))
+                Spacer(minLength: 12)
+                if count > 1 {
+                    Button {
+                        app.focusHint(item, at: (index + 1) % count)
+                    } label: {
+                        Label("下一处", systemImage: "arrow.right").font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                }
+                Button {
+                    app.focusHint(item, at: nil)
+                } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 11, weight: .bold))
+                        .frame(width: 26, height: 26)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("收起提示")
+            }
+            ForEach(0..<level, id: \.self) { (k: Int) in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(Self.levelNames[min(k, Self.levelNames.count - 1)])
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(k == 2 ? Theme.ok : Theme.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background((k == 2 ? Theme.ok : Theme.accent).opacity(0.12), in: Capsule())
+                    Text(issue.hints[k])
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .transition(.opacity.combined(with: .offset(y: -3)))
+            }
+            if level < issue.hints.count {
+                let last = level == issue.hints.count - 1
+                Button {
+                    app.revealHint(item, at: index)
+                } label: {
+                    Label(last ? "看答案" : "再给一点提示", systemImage: last ? "eye" : "lightbulb")
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .hoverEffect(.highlight)
+            } else {
+                Text("改好以后再双击笔身，选「检查」")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(width: 340, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline))
+        .shadow(color: .black.opacity(0.1), radius: 10, y: 4)
+    }
+}
+
 // MARK: - 识别中、淡出、提示
 
 /// 正在识别的那一段：一层淡淡的底色，一道光扫过去，右下角写「识别中」。
@@ -273,7 +492,7 @@ private struct BusyOverlay: View {
             .overlay(alignment: .bottomTrailing) {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.mini)
-                    Text(job.kind == .solve ? "计算中" : "识别中").font(.caption2.weight(.semibold))
+                    Text(job.kind == .solve ? "计算中" : job.kind == .check ? "检查中" : "识别中").font(.caption2.weight(.semibold))
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(.regularMaterial, in: Capsule())

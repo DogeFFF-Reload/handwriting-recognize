@@ -6,6 +6,7 @@ import SwiftUI
 /// CI 截图用启动参数 `-demo <名字>`：直接打开一张不存盘的演示纸；`-demo gallery` 是放了几份示例草稿的画廊。
 struct ContentView: View {
     @State private var library: BoardLibrary
+    @State private var summaries: SummaryCenter
     @State private var open: BoardMeta?
     private let demo: String?
 
@@ -13,14 +14,20 @@ struct ContentView: View {
         let args = ProcessInfo.processInfo.arguments
         let demo = args.firstIndex(of: "-demo").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         self.demo = demo
+        let library: BoardLibrary
         if demo == "gallery" {
             // 演示画廊：放在临时目录，不碰真的草稿
             let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("DemoBoards", isDirectory: true)
             try? FileManager.default.removeItem(at: tmp)
-            _library = State(initialValue: BoardLibrary.demo(at: tmp))
+            library = BoardLibrary.demo(at: tmp)
         } else {
-            _library = State(initialValue: BoardLibrary())
+            library = BoardLibrary()
         }
+        let summaries = SummaryCenter(library: library)
+        // 演示画廊：底下那条「已保存 · 总结内容」也摆出来
+        if demo == "gallery" { summaries.offered = library.boards.first { library.summaries[$0.id] == nil }?.id }
+        _library = State(initialValue: library)
+        _summaries = State(initialValue: summaries)
     }
 
     var body: some View {
@@ -28,11 +35,15 @@ struct ContentView: View {
             BoardScreen(library: library, meta: nil, demo: demo, onClose: {})
         } else {
             NavigationStack {
-                GalleryView(library: library) { open = $0 }
+                GalleryView(library: library, summaries: summaries) { open = $0 }
                     .navigationDestination(item: $open) { meta in
-                        BoardScreen(library: library, meta: meta, demo: nil) { open = nil }
-                            .toolbar(.hidden, for: .navigationBar)
-                            .navigationBarBackButtonHidden()
+                        BoardScreen(library: library, meta: meta, demo: nil) {
+                            open = nil
+                            // 离开草稿：问一句要不要总结（点了才调模型）
+                            summaries.offer(meta.id)
+                        }
+                        .toolbar(.hidden, for: .navigationBar)
+                        .navigationBarBackButtonHidden()
                     }
             }
             .tint(Theme.accent)
@@ -163,7 +174,9 @@ struct BoardScreen: View {
         let thumbnail = thumbnail && (changed || force)
         guard changed || thumbnail else { return false }
         let image = thumbnail ? BoardThumbnail.capture() : nil
-        library.write(meta.id, board: board, drawing: drawing, thumbnail: image)
+        // 纸上收成式子的东西一起存：画廊里点「总结内容」时不用打开草稿
+        let digest = try? BoardLibrary.encoder.encode(app.noteDigest(title: title))
+        library.write(meta.id, board: board, drawing: drawing, thumbnail: image, digest: digest)
         lastSaved = (board, drawing)
         return true
     }

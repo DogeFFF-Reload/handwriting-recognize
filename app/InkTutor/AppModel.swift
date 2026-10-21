@@ -28,6 +28,8 @@ final class AppModel {
     private(set) var geometries: [GeometryItem] = []
     /// 选「几何」认出来的图形（平面的、立体的），直接画在纸上。
     private(set) var shapes: [ShapeItem] = []
+    /// 选「检查」看过的几行（笔迹留着，画圈和提示）。不存盘。
+    private(set) var checks: [CheckItem] = []
     /// 选中的式子或卡片（显示操作条或变换框）。
     var selection: Selection?
     /// 正在手动改 LaTeX 的式子（操作条上的「改式子」）。
@@ -102,8 +104,26 @@ final class AppModel {
             f.inkIDs = f.inkIDs.filter { present.contains($0) }
         }
         functions.removeAll { $0.showingInk && $0.inkIDs.isEmpty && !hasStrokes(near: $0) }
+        markChecksEdited(present: present, added: added)
         refreshUndo()
         growPage()
+    }
+
+    /// 检查过的那几行又动过了（擦了、在附近写了）：学生在改，圈变淡、提示收起来；整行擦光了就不要了。
+    private func markChecksEdited(present: Set<String>, added: [InkStroke]) {
+        guard !checks.isEmpty else { return }
+        for c in checks where !c.stale {
+            let reach = c.bounds.insetBy(dx: -24, dy: -16)
+            let erased = c.strokeIDs.contains { !present.contains($0) }
+            let wrote = added.contains { $0.bounds.intersects(reach) }
+            if erased || wrote {
+                c.stale = true
+                c.focus = nil
+            }
+        }
+        checks.removeAll { c in
+            c.strokeIDs.isDisjoint(with: present) && !strokes.contains { $0.bounds.intersects(c.bounds) }
+        }
     }
 
     // MARK: 滚动
@@ -196,6 +216,7 @@ final class AppModel {
             menu.recognized = r
             menu.liveRecognition = true
             menu.offersMatrix = MatrixMath.contains(latex)
+            menu.offersTransform = menu.offersMatrix && MatrixMath.linearMap(latex) != nil
             withAnimation(.spring(response: 0.34, dampingFraction: 0.75)) { self?.menu = menu }
         }
     }
@@ -275,6 +296,8 @@ final class AppModel {
             } else {
                 recognizeMath(seg, kind)
             }
+        case .check:
+            check(seg, preview: m.liveRecognition ? m.recognized : nil)
         case .geometry:
             buildGeometry(seg)
         case .matrix:
@@ -457,12 +480,14 @@ final class AppModel {
             return
         }
         if MatrixMath.contains(tex) {
-            let action = item.solution.flatMap { MatrixMath.action(for: $0.operation) } ?? .calculate
+            let action = matrixAction(of: item)
             guard let target = item.solveSource != nil ? item : convertToComputed(item) else { return }
             withAnimation(.easeOut(duration: 0.2)) {
                 target.solveSource = tex
                 target.engine = "手动"
+                target.matrixAction = action
                 setSolution(target, .success(MatrixMath.solve(tex, action: action)))
+                setupTransform(target, reset: true)
             }
             return
         }
@@ -501,7 +526,7 @@ final class AppModel {
         // 按笔画本身重新取 id（重新打开的草稿里，原来记的 id 已经对不上了）
         item.inkIDs = item.ink.map { ids.id(for: $0) }
         withAnimation(.easeOut(duration: 0.2)) { item.showingInk = true }
-        let again = item.solution.flatMap { MatrixMath.action(for: $0.operation) } != nil ? "矩阵" : (item.isComputed ? "求解" : "函数")
+        let again = item.matrixAction != nil ? "矩阵" : (item.isComputed ? "求解" : "函数")
         toast("改完后双击笔身，选「\(again)」重新识别",
               at: CGPoint(x: item.frame.midX, y: item.frame.maxY + 26), .info)
     }
@@ -517,6 +542,7 @@ final class AppModel {
         if item.showingInk, !keepInk { removeStrokes(Set(item.inkIDs)) }
         if selection?.id == item.id { selection = nil }
         withAnimation(.easeOut(duration: 0.2)) {
+            detachFromComparisons(item)
             functions.removeAll { $0.id == item.id }
             // 删掉的是导数：这条函数没有别的导数了，图像里的导函数也收起来
             if let p = item.derivedFrom, let parent = functions.first(where: { $0.id == p }),
@@ -628,6 +654,120 @@ final class AppModel {
         }
     }
 
+    // MARK: 检查这一步
+
+    /// 选「检查」：学生在函数下面自己写的 f'(x) = …，和上面那条 f(x) 对一下。笔迹不收成式子；
+    /// 有问题的项画红圈，提示学生自己点开；全对时行尾打个绿勾。同一行改完再检查，沿用原来的行号。
+    private func check(_ seg: InkSegment, preview: RecognitionResult?) {
+        let members = Set(seg.strokeIDs)
+        let earlier = checks.first { !$0.strokeIDs.isDisjoint(with: members) || $0.bounds.intersects(seg.bounds) }
+        let lineID = earlier?.lineID ?? nextLineID("C")
+        let revision = (earlier?.revision ?? 0) + 1
+        let line = makeLine(lineID, revision: revision, mode: .derivative, seg)
+        if let r = preview, !r.latex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // 预识别不记回放的账，这里补上
+            let position = Self.replayTracker.observe(lineID: line.id, mode: line.mode, strokeIDs: line.strokes.map(\.id))
+            if UserDefaults.standard.bool(forKey: "recordReplay") { Self.replayRecorder.record(position, latex: r.latex) }
+            finishCheck(seg, line: line, result: r)
+            return
+        }
+        let pk = seg.strokeIDs.compactMap { pkByID[$0] }
+        let job = BusySegment(bounds: seg.bounds, kind: .check)
+        busy.append(job)
+        let png = PencilKitBridge.png(of: line, in: drawing, ids: &ids)
+        let recognizer = Self.makeRecognizer(strokes: pk)
+        Task { @MainActor [weak self] in
+            defer { self?.busy.removeAll { $0.id == job.id } }
+            do {
+                let r = try await recognizer.recognize(line: line, imagePNG: png)
+                self?.finishCheck(seg, line: line, result: r)
+            } catch {
+                self?.toast("没认出来：\(AppModel.describe(error))", at: CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24), .warning)
+            }
+        }
+    }
+
+    private func finishCheck(_ seg: InkSegment, line: InkLine, result r: RecognitionResult) {
+        let below = CGPoint(x: seg.bounds.midX, y: seg.bounds.maxY + 24)
+        guard seg.strokeIDs.allSatisfy({ pkByID[$0] != nil }) else {
+            toast("识别时这段又改过了，改完再双击一次", at: below, .info)
+            return
+        }
+        let latex = r.latex.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !latex.isEmpty else {
+            toast("没认出来：写清楚一点再双击", at: below, .warning)
+            return
+        }
+        guard let request = DerivativeRequest.parse(latex) else {
+            toast("「检查」现在只看求导这一步：在 f(x) = … 下面写 f'(x) = …", at: below, .info)
+            return
+        }
+        guard let parent = parentFunction(for: request, near: seg.bounds) else {
+            toast("先写 \(request.name)(x) = …（双击后选「函数」），再检查 \(request.name)'(x)", at: below, .warning)
+            return
+        }
+        let result: StepReview.Result
+        do {
+            result = try StepReview.review(line: line, functionLatex: parent.latex, stepLatex: latex)
+        } catch let problem as StepReview.Problem {
+            let text: String
+            switch problem {
+            case .notADerivative: text = "等号后面还没写：写完 \(request.name)'(x) = … 再检查"
+            case .higherOrder: text = "「检查」现在只看一阶导数 \(request.name)'(x)"
+            case .unsupportedFunction: text = "「检查」现在只看多项式的求导，\(parent.name)(x) 不是多项式"
+            case .unreadable: text = "这一行没看清：写清楚一点再双击"
+            }
+            toast(text, at: below, .info)
+            return
+        } catch {
+            toast(Self.describe(error), at: below, .warning)
+            return
+        }
+        let members = Set(seg.strokeIDs)
+        let item = CheckItem(lineID: line.id, revision: line.revision, strokeIDs: members, bounds: seg.bounds, result: result,
+                             functionName: parent.name, recognized: r)
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.8)) {
+            checks.removeAll { !$0.strokeIDs.isDisjoint(with: members) || $0.bounds.intersects(seg.bounds) }
+            checks.append(item)
+        }
+        if result.ok {
+            toast("这一步对了", at: CGPoint(x: seg.bounds.maxX + 40, y: seg.bounds.minY - 24), .success)
+        }
+    }
+
+    /// 打开第 index 处的下一级提示（第一次点是第一级的反问）。
+    func revealHint(_ c: CheckItem, at index: Int) {
+        guard c.result.issues.indices.contains(index) else { return }
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            c.focus = index
+            c.levels[index] = min(c.levels[index] + 1, c.result.issues[index].hints.count)
+        }
+    }
+
+    /// 换到另一处问题看提示（已经打开的级别留着）。
+    func focusHint(_ c: CheckItem, at index: Int?) {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            c.focus = index
+            if let i = index, c.result.issues.indices.contains(i), c.levels[i] == 0 { c.levels[i] = 1 }
+        }
+    }
+
+    func dismiss(_ c: CheckItem) {
+        withAnimation(.easeOut(duration: 0.2)) { checks.removeAll { $0.id == c.id } }
+    }
+
+    /// 检查对了：把这一行收成标准式子（等号右边照常求出来）。
+    func adopt(_ c: CheckItem) {
+        let mine = strokes.filter { c.strokeIDs.contains($0.id) }
+        guard !mine.isEmpty else {
+            dismiss(c)
+            return
+        }
+        let seg = InkSegment(strokeIDs: mine.map(\.id), bounds: InkSegmenter.bounds(of: mine), targetID: nil)
+        dismiss(c)
+        finishFromRecognition(seg, result: c.recognized, kind: .solve)
+    }
+
     // MARK: 求解
 
     /// 画板上已经写过的函数（按名字，后写的算数），滑条上的参数取当前值：求解里的 f(x)、f'(2) 用它。
@@ -700,9 +840,49 @@ final class AppModel {
         item.engine = r.engine
         item.ms = r.ms
         item.solveSource = latex
+        item.matrixAction = action
         setSolution(item, .success(MatrixMath.solve(latex, action: action)))
         item.origin = CGPoint(x: seg.bounds.minX, y: seg.bounds.midY - item.size.height / 2)
+        setupTransform(item, reset: true)
+        if item.linearMap != nil, item.card.size == .zero || reuse == nil {
+            // 「看变换」：卡片挂在式子右上角，和函数卡片一样
+            item.card = placeCard(next: item.frame, size: transformCardSize)
+        }
         replaceInk(seg, ink: seg.strokeIDs.compactMap { pkByID[$0] }, with: item, isNew: reuse == nil)
+    }
+
+    /// 矩阵这一项上次选的是哪种运算（没记下来时按结果的种类认）。
+    private func matrixAction(of item: FunctionItem) -> MatrixAction {
+        item.matrixAction ?? item.solution.flatMap { MatrixMath.action(for: $0.operation) } ?? .calculate
+    }
+
+    /// 「看变换」的卡片默认大小。
+    private var transformCardSize: CGSize { compact ? CGSize(width: 270, height: 290) : CGSize(width: 330, height: 360) }
+
+    /// 选的是「看变换」：认出 2×2 矩阵，卡片里画它。reset：刚写的（或改过式子）的矩阵记成「复位」回到的样子。
+    private func setupTransform(_ item: FunctionItem, reset: Bool = false) {
+        guard item.matrixAction == .transform, let src = item.solveSource, let map = MatrixMath.linearMap(src) else {
+            item.linearMap = nil
+            return
+        }
+        item.linearMap = map
+        if reset || item.originalMap == nil { item.originalMap = map }
+    }
+
+    /// 卡片里拖了基向量：矩阵换成新的，纸上的式子跟着改写（名字留着）。
+    func setLinearMap(_ item: FunctionItem, _ map: LinearMap2) {
+        guard let src = item.solveSource, map != item.linearMap else { return }
+        let tex = MatrixMath.rewrite(src, with: map)
+        item.solveSource = tex
+        item.engine = "手动"
+        setSolution(item, .success(MatrixMath.solve(tex, action: .transform)))
+        item.linearMap = map
+    }
+
+    /// 「复位」：回到刚写的那个矩阵。
+    func resetTransform(_ item: FunctionItem) {
+        guard let original = item.originalMap else { return }
+        withAnimation(.easeOut(duration: 0.25)) { setLinearMap(item, original) }
     }
 
     /// 预识别已经有了，选函数 / 求解时直接用，同时把回放行号补上（预识别本身不记账）。
@@ -723,6 +903,7 @@ final class AppModel {
     private func reopenMatrixMenu(_ seg: InkSegment, result: RecognitionResult) {
         var state = SegmentMenuState(anchor: CGPoint(x: seg.bounds.maxX, y: seg.bounds.midY), segment: seg)
         state.offersMatrix = true
+        state.offersTransform = MatrixMath.linearMap(result.latex) != nil
         state.matrixOpen = true
         state.recognized = result
         state.liveRecognition = true
@@ -777,8 +958,10 @@ final class AppModel {
         for item in functions where item.solveSource != nil {
             guard let src = item.solveSource else { continue }
             if MatrixMath.contains(src) {
-                let action = item.solution.flatMap { MatrixMath.action(for: $0.operation) } ?? .calculate
+                let action = matrixAction(of: item)
+                item.matrixAction = action
                 setSolution(item, .success(MatrixMath.solve(src, action: action)))
+                setupTransform(item)
                 continue
             }
             let uses = name.map { item.solution?.references.contains($0) ?? false } ?? true
@@ -838,6 +1021,7 @@ final class AppModel {
         new.inkSourceIDs = old.inkSourceIDs
         new.engine = old.engine
         new.ms = old.ms
+        detachFromComparisons(old)
         for f in functions { f.graph?.removeOverlay(id: old.id.uuidString) }
         if let i = functions.firstIndex(where: { $0.id == old.id }) { functions[i] = new } else { functions.append(new) }
         if selection?.id == old.id { selection = .formula(new.id) }
@@ -852,6 +1036,111 @@ final class AppModel {
         var errorDescription: String? { "用到的函数已经删掉了" }
     }
 
+    // MARK: 两个函数同图
+
+    /// 画在这张卡片里的别的函数。
+    func companions(of item: FunctionItem) -> [FunctionItem] {
+        item.companions.compactMap { id in functions.first { $0.id == id && $0.graph != nil } }
+    }
+
+    /// 能画进这张卡片的函数：纸上别的、有图像的、还没画进别的卡片里的。
+    func mergeCandidates(for item: FunctionItem) -> [FunctionItem] {
+        functions.filter { f in
+            f.id != item.id && f.graph != nil && !f.isComputed && f.mergedInto == nil && !item.companions.contains(f.id)
+        }
+    }
+
+    /// 把 other 画进 host 的卡片：两条曲线同图，标出交点；有两个以上交点时先选好相邻两个交点之间的区间，
+    /// 涂出两曲线之间的面积。other 自己的卡片收起来（它要是也画着别的函数，一起搬过来）。
+    func merge(_ other: FunctionItem, into host: FunctionItem) {
+        guard other.id != host.id, other.graph != nil, let graph = host.graph,
+              host.mergedInto == nil, other.mergedInto == nil else { return }
+        let moving = [other.id] + other.companions
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+            for id in moving where id != host.id && !host.companions.contains(id) {
+                host.companions.append(id)
+                functions.first { $0.id == id }?.mergedInto = host.id
+            }
+            other.companions = []
+            other.graph?.region = nil
+            if selection?.id == other.id { selection = nil }
+            host.card.minimized = false
+            if graph.region == nil { graph.region = defaultRegion(host) }
+            graph.viewport = nil
+        }
+        let below = CGPoint(x: host.card.center.x, y: host.card.center.y + host.card.size.height / 2 + 26)
+        toast(graph.region == nil ? "\(other.name)(x) 画进了 \(host.name)(x) 的图里"
+                                  : "\(other.name)(x) 画进来了：拖两条竖线改区间", at: below, .info)
+    }
+
+    /// 从合并的图里拿出来，自己的卡片放回式子旁边。
+    func unmerge(_ item: FunctionItem) {
+        guard let hostID = item.mergedInto else { return }
+        let host = functions.first { $0.id == hostID }
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+            host?.companions.removeAll { $0 == item.id }
+            if host?.companions.isEmpty ?? false { host?.graph?.region = nil }
+            item.mergedInto = nil
+            let size = item.card.size.width > 0 ? item.card.size : defaultCardSize
+            item.card = placeCard(next: item.frame, size: size)
+        }
+    }
+
+    /// 函数卡片拖到另一张函数卡片上松手：合成一张图。
+    func cardDropped(_ item: FunctionItem) {
+        guard item.graph != nil, item.mergedInto == nil else { return }
+        let p = item.card.center
+        let host = functions.first { f in
+            guard f.id != item.id, f.graph != nil, f.mergedInto == nil, !f.card.minimized else { return false }
+            let r = CGRect(x: f.card.center.x - f.card.size.width / 2, y: f.card.center.y - f.card.size.height / 2,
+                           width: f.card.size.width, height: f.card.size.height)
+            return r.contains(p)
+        }
+        if let host { merge(item, into: host) }
+    }
+
+    /// 标题栏的区间开关：打开时默认取相邻两个交点之间（没有两个交点就取 [−1, 1]，自己拖）。
+    func toggleRegion(_ host: FunctionItem) {
+        guard let graph = host.graph else { return }
+        withAnimation(.easeOut(duration: 0.2)) {
+            graph.region = graph.region == nil ? (defaultRegion(host) ?? GraphRegion(from: -1, to: 1)) : nil
+        }
+    }
+
+    /// 和第一条画进来的函数的交点里，离原点最近的相邻两个之间。
+    private func defaultRegion(_ host: FunctionItem) -> GraphRegion? {
+        guard let f = host.graph, let g = companions(of: host).first?.graph else { return nil }
+        let xs = CurveMath.intersections(f.y, g.y, in: -12, 12)
+        guard xs.count >= 2 else { return nil }
+        var best = (0, Double.infinity)
+        for i in 0..<(xs.count - 1) {
+            let mid = abs(xs[i] + xs[i + 1]) / 2
+            if mid < best.1 { best = (i, mid) }
+        }
+        return GraphRegion(from: xs[best.0], to: xs[best.0 + 1])
+    }
+
+    /// 删掉或换掉一条函数时：它画着的别的函数回到自己的卡片；它自己画在别的卡片里的话从那张图里拿掉。
+    private func detachFromComparisons(_ item: FunctionItem) {
+        for f in companions(of: item) {
+            f.mergedInto = nil
+            f.card.minimized = false
+        }
+        item.companions = []
+        if let hostID = item.mergedInto, let host = functions.first(where: { $0.id == hostID }) {
+            host.companions.removeAll { $0 == item.id }
+            if host.companions.isEmpty { host.graph?.region = nil }
+        }
+        item.mergedInto = nil
+    }
+
+    /// 图上的交点、面积写成准确值（32/3、√2、π/4），认不出来写 ≈ 小数。
+    static func graphValue(_ v: Double) -> String {
+        guard v.isFinite else { return "—" }
+        if let c = Numerics.closedForm(v, tolerance: 1e-9) { return Solver.plainText(c.latex) }
+        return "≈" + GraphTicks.coordinate(v)
+    }
+
     static func operationTitle(_ op: Solution.Operation) -> String {
         switch op {
         case .derivative: return "求导"
@@ -863,6 +1152,7 @@ final class AppModel {
         case .matrix: return "矩阵运算"
         case .inverse: return "逆矩阵"
         case .determinant: return "行列式"
+        case .transform: return "看变换"
         }
     }
 
@@ -997,6 +1287,7 @@ final class AppModel {
             functions = []
             geometries = []
             shapes = []
+            checks = []
         }
         setDrawing(PKDrawing())
         lineNumbers = [:]
@@ -1153,9 +1444,24 @@ extension AppModel {
     /// - card：标准式子 + 选中的函数卡片（转了一点）+ 一条收起的函数
     /// - reveal：f(x)=x²−4，下面写 f'(x) 求出来的 2x，卡片里画出导函数
     /// - solve：f(x)=x²−4，下面写 ∫_0^2 f(x)dx（卡片里涂出面积）、lim_{x→0} sin x / x、∑_{k=1}^n k²，选「求解」
+    /// - check：f(x)=x³−3x 下面自己写 f'(x)=3x²−3x，选「检查」：圈出 −3x，打开第一级提示
+    /// - transform：A=(2 0; 0 1) 选「看变换」：单位正方形横向拉长两倍
+    /// - compare：f(x)=x² 和 g(x)=2x+3 画进同一张图：交点、两曲线之间的面积
     func loadDemo(_ name: String) {
         if name == "solve" {
             loadSolveDemo()
+            return
+        }
+        if name == "check" {
+            loadCheckDemo()
+            return
+        }
+        if name == "transform" {
+            loadTransformDemo()
+            return
+        }
+        if name == "compare" {
+            loadCompareDemo()
             return
         }
         if name == "shapes" || name == "solids" {
@@ -1310,6 +1616,58 @@ extension AppModel {
         f.card.size = CGSize(width: 430, height: 330)
         f.card.center = CGPoint(x: max(f.anchor.x, 640) + 24 + 215, y: max(f.anchor.y - 12 - 165, topInset + 175))
     }
+
+    /// 写一条函数（笔迹只是占位，识别结果直接给定），返回收成的那一项。
+    @discardableResult
+    private func demoFunction(_ ink: String, latex: String, y: CGFloat, start: Double) -> FunctionItem? {
+        var d = drawing
+        d.strokes.append(contentsOf: DemoInk.strokes(ink, at: CGPoint(x: 120, y: y), height: 50, start: Date(timeIntervalSinceReferenceDate: start)))
+        setDrawing(d)
+        guard let seg = segment(near: nil) else { return nil }
+        let lineID = nextLineID("F")
+        finishFunction(seg, result: RecognitionResult(lineID: lineID, revision: 1, latex: latex, engine: "MyScript", ms: 146),
+                       target: nil, lineID: lineID, revision: 1, ink: seg.strokeIDs.compactMap { pkByID[$0] })
+        return functions.last
+    }
+
+    private func loadCheckDemo() {
+        clear()
+        demoFunction("f(x)=x^3-3x", latex: "f\\left( x\\right) =x^{3}-3x", y: 200, start: 800_000_000)
+        // 学生自己写的这一步留在纸上
+        var d = drawing
+        d.strokes.append(contentsOf: DemoInk.strokes("f'(x)=3x^2-3x", at: CGPoint(x: 120, y: 420), height: 54,
+                                                     start: Date(timeIntervalSinceReferenceDate: 800_000_100)))
+        setDrawing(d)
+        guard let seg = segment(near: nil) else { return }
+        let line = makeLine(nextLineID("C"), revision: 1, mode: .derivative, seg)
+        finishCheck(seg, line: line, result: RecognitionResult(lineID: line.id, revision: 1, latex: "f^{\\prime}\\left( x\\right) =3x^{2}-3x",
+                                                               engine: "MyScript", ms: 131))
+        if let c = checks.first { revealHint(c, at: 0) }
+        functions.first?.card.minimized = true
+    }
+
+    private func loadTransformDemo() {
+        clear()
+        // 笔迹只是占位（马上换成标准式子），识别结果直接给定
+        setDrawing(PKDrawing(strokes: DemoInk.strokes("(2)", at: CGPoint(x: 120, y: 300), height: 96)))
+        guard let seg = segment(near: nil) else { return }
+        let latex = "A=\\begin{pmatrix}2 & 0 \\\\ 0 & 1\\end{pmatrix}"
+        finishMatrix(seg, latex: latex, result: RecognitionResult(lineID: "M1", revision: 1, latex: latex, engine: "MyScript", ms: 172),
+                     action: .transform)
+        if let a = functions.first {
+            a.card.size = CGSize(width: 380, height: 400)
+            a.card.center = CGPoint(x: a.frame.maxX + 40 + 190, y: max(a.frame.midY, topInset + 220))
+        }
+    }
+
+    private func loadCompareDemo() {
+        clear()
+        guard let f = demoFunction("f(x)=x^2", latex: "f\\left( x\\right) =x^{2}", y: 200, start: 800_000_000),
+              let g = demoFunction("f(x)=2x", latex: "g\\left( x\\right) =2x+3", y: 330, start: 800_000_100) else { return }
+        merge(g, into: f)
+        f.card.size = CGSize(width: 460, height: 360)
+        f.card.center = CGPoint(x: max(f.anchor.x, 600) + 24 + 230, y: max(f.anchor.y - 12 - 180, topInset + 190))
+    }
 }
 
 // MARK: - 存盘、打开（多份草稿）
@@ -1327,7 +1685,10 @@ extension AppModel {
                                     card: CardSnapshot(f.card), tintIndex: f.tintIndex, showsSliders: f.showsSliders, minimal: f.minimal,
                                     engine: f.engine, ms: f.ms, ink: PKDrawing(strokes: f.ink).dataRepresentation(),
                                     parent: f.derivedFrom.flatMap { index[$0] }, request: f.request, solveSource: f.solveSource,
-                                    params: params, reveal: f.graph?.reveal ?? false)
+                                    params: params, reveal: f.graph?.reveal ?? false,
+                                    matrixAction: f.matrixAction?.rawValue, originalMap: f.originalMap,
+                                    companions: f.companions.isEmpty ? nil : f.companions.compactMap { index[$0] },
+                                    region: f.graph?.region.map { [$0.from, $0.to] })
         }
         let ss = shapes.map { (s: ShapeItem) -> ShapeSnapshot in
             ShapeSnapshot(figure: s.figure, group: s.group, ink: PKDrawing(strokes: s.ink).dataRepresentation(), showsLabels: s.showsLabels)
@@ -1342,6 +1703,61 @@ extension AppModel {
     /// 纸上的笔迹（PKDrawing 数据）。
     var drawingData: Data { drawing.dataRepresentation() }
 
+    /// 总结笔记用的这一页：收成式子的东西从上到下排好（同一行从左到右），式子写成不带颜色的 LaTeX。
+    func noteDigest(title: String) -> NoteDigest {
+        var rows: [(at: CGPoint, line: NoteDigest.Line)] = []
+        for f in functions where !f.showingInk {
+            let kind: NoteDigest.Line.Kind
+            var note: String?
+            if f.matrixAction != nil {
+                kind = .matrix
+                let name: String = MatrixMath.name(f.solveSource ?? "").map { " \($0)：" } ?? "："
+                let what: String = f.solution.map { Self.operationTitle($0.operation) } ?? "矩阵运算"
+                note = name + what
+            } else if f.derivedFrom != nil {
+                kind = .derivative
+            } else if let s = f.solution {
+                kind = .solution
+                var what = Self.operationTitle(s.operation)
+                if s.result == nil, let n = s.note { what += "，" + n }
+                note = what
+            } else {
+                kind = .function
+                note = f.problem.map { "画不出图：\($0)" }
+            }
+            rows.append((f.origin, NoteDigest.Line(kind: kind, text: plainLatex(f), note: note)))
+        }
+        for s in shapes {
+            let facts = s.figure.facts.prefix(2).joined(separator: "，")
+            let text = facts.isEmpty ? s.figure.name : "\(s.figure.name)（\(facts)）"
+            rows.append((s.figure.bounds.origin, NoteDigest.Line(kind: .shape, text: text)))
+        }
+        for g in geometries {
+            let at = CGPoint(x: g.card.center.x - g.card.size.width / 2, y: g.card.center.y - g.card.size.height / 2)
+            rows.append((at, NoteDigest.Line(kind: .shape, text: "三角形和中线（动态几何）")))
+        }
+        for c in checks {
+            let verdict = c.result.ok ? "对了" : "有 \(c.result.issues.count) 处要改"
+            rows.append((c.bounds.origin, NoteDigest.Line(kind: .check, text: c.recognized.latex, note: verdict)))
+        }
+        // 一行 40 pt 高，同一行里从左到右
+        rows.sort { a, b in
+            let ra = Int((a.at.y / 40).rounded(.down)), rb = Int((b.at.y / 40).rounded(.down))
+            return ra != rb ? ra < rb : a.at.x < b.at.x
+        }
+        return NoteDigest(title: title, lines: rows.map { $0.line }, hasLooseInk: hasInk)
+    }
+
+    /// 式子连同算出来的结果，不带显示用的颜色。
+    private func plainLatex(_ f: FunctionItem) -> String {
+        if let s = f.solution {
+            guard let r = s.result else { return s.input }
+            return s.input + " " + s.relation + " " + r
+        }
+        if let lhs = f.lhsLatex, let rhs = f.resultLatex { return lhs + "=" + rhs }
+        return f.latex
+    }
+
     /// 打开一份草稿：先放笔迹，再一条条重建式子（函数 → 导数 → 求解），最后按存的样子摆卡片。
     func restore(_ snap: BoardSnapshot?, drawing d: PKDrawing) {
         menu = nil
@@ -1349,6 +1765,7 @@ extension AppModel {
         functions = []
         shapes = []
         geometries = []
+        checks = []
         lineNumbers = snap?.lineNumbers ?? [:]
         setDrawing(d)
         guard let snap else { return }
@@ -1366,6 +1783,8 @@ extension AppModel {
             item.ms = s.ms
             item.ink = strokes(s.ink)
             if s.kind == .solve { item.solveSource = s.solveSource ?? s.latex }
+            item.matrixAction = s.matrixAction.flatMap { MatrixAction(rawValue: $0) }
+            item.originalMap = s.originalMap
             items.append(item)
         }
         functions = items
@@ -1384,6 +1803,14 @@ extension AppModel {
             item.card = s.card.frame
             item.origin = s.origin
             item.graph?.reveal = s.reveal
+            // 两个函数同图：画进来的那几条、选的区间
+            for k in s.companions ?? [] where items.indices.contains(k) && items[k].id != item.id && items[k].graph != nil {
+                item.companions.append(items[k].id)
+                items[k].mergedInto = item.id
+            }
+            if let r = s.region, r.count == 2, !item.companions.isEmpty {
+                item.graph?.region = GraphRegion(from: r[0], to: r[1])
+            }
         }
         shapes = snap.shapes.map { (s: ShapeSnapshot) -> ShapeItem in
             let item = ShapeItem(figure: s.figure, group: s.group, ink: strokes(s.ink))

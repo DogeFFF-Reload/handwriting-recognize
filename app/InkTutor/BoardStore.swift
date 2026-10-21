@@ -10,7 +10,9 @@ import UIKit
 //   board.json    式子、卡片、几何图形（BoardSnapshot）
 //   drawing.data  纸上的笔迹（PKDrawing）
 //   thumb.jpg     画廊里的缩略图（离开草稿、切到后台时截一张）
-// 草稿打开时每 3 秒检查一次，有变化就存；离开、切到后台时也存。
+//   digest.json   纸上收成式子的东西（NoteDigest），总结笔记用；和 board.json 一起存
+//   summary.json  点「总结内容」后 qwen3.8-max 写的要点（NoteSummary）
+// 草稿打开时每 3 秒检查一次，有变化就存；离开、切到后台时也存。总结不自动做：离开草稿时画廊顶上问一句，点了才调模型。
 
 /// 画廊里显示的一份草稿。
 struct BoardMeta: Codable, Identifiable, Hashable {
@@ -61,6 +63,13 @@ struct FunctionSnapshot: Codable {
     /// 参数滑条的值（a、b、k…）。多项式系数已经写进 latex 了。
     var params: [String: Double]
     var reveal: Bool
+    /// 矩阵菜单里选的运算（calculate / inverse / determinant / transform）。以前的草稿没有这一项，按「计算」重算。
+    var matrixAction: String?
+    /// 「看变换」刚写的矩阵：「复位」回到它（拖过的矩阵已经写进 solveSource 了）。
+    var originalMap: LinearMap2?
+    /// 画进这张卡片的别的函数是第几条，和选的区间 [from, to]。
+    var companions: [Int]?
+    var region: [Double]?
 }
 
 struct ShapeSnapshot: Codable {
@@ -94,6 +103,8 @@ final class BoardLibrary {
     private(set) var boards: [BoardMeta] = []
     /// 缩略图换过就加一，画廊重新读图。
     private(set) var thumbnailVersion = 0
+    /// 每份草稿总结出来的要点（summary.json）。
+    private(set) var summaries: [UUID: NoteSummary] = [:]
     let root: URL
     @ObservationIgnored private var thumbnails: [UUID: (Date, UIImage?)] = [:]
 
@@ -113,6 +124,13 @@ final class BoardLibrary {
             return try? Self.decoder.decode(BoardMeta.self, from: data)
         }
         .sorted { $0.modified > $1.modified }
+        var found: [UUID: NoteSummary] = [:]
+        for meta in boards {
+            guard let data = try? Data(contentsOf: folder(meta.id).appendingPathComponent("summary.json")),
+                  let s = try? Self.decoder.decode(NoteSummary.self, from: data) else { continue }
+            found[meta.id] = s
+        }
+        summaries = found
     }
 
     /// 新建一份空白草稿：「未命名草稿」「未命名草稿 2」……
@@ -153,6 +171,7 @@ final class BoardLibrary {
         }
         writeMeta(copy)
         boards.insert(copy, at: 0)
+        summaries[copy.id] = summaries[meta.id]
         return copy
     }
 
@@ -160,6 +179,7 @@ final class BoardLibrary {
         try? FileManager.default.removeItem(at: folder(meta.id))
         boards.removeAll { $0.id == meta.id }
         thumbnails[meta.id] = nil
+        summaries[meta.id] = nil
     }
 
     func meta(_ id: UUID) -> BoardMeta? { boards.first { $0.id == id } }
@@ -173,9 +193,9 @@ final class BoardLibrary {
         return (snap, drawing)
     }
 
-    /// 存一份草稿；内容和上次一样就不写（返回 false）。
+    /// 存一份草稿；内容和上次一样就不写（返回 false）。digest：纸上收成式子的东西（总结用），变了才写。
     @discardableResult
-    func write(_ id: UUID, board: Data, drawing: Data, thumbnail: UIImage?) -> Bool {
+    func write(_ id: UUID, board: Data, drawing: Data, thumbnail: UIImage?, digest: Data? = nil) -> Bool {
         let dir = folder(id)
         let boardURL = dir.appendingPathComponent("board.json"), drawingURL = dir.appendingPathComponent("drawing.data")
         let unchanged = (try? Data(contentsOf: boardURL)) == board && (try? Data(contentsOf: drawingURL)) == drawing
@@ -183,6 +203,11 @@ final class BoardLibrary {
             try? jpg.write(to: dir.appendingPathComponent("thumb.jpg"), options: .atomic)
             thumbnails[id] = nil
             thumbnailVersion += 1
+        }
+        let digestURL = dir.appendingPathComponent("digest.json")
+        if let digest, (try? Data(contentsOf: digestURL)) != digest {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? digest.write(to: digestURL, options: .atomic)
         }
         guard !unchanged else { return false }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -209,6 +234,48 @@ final class BoardLibrary {
     private func writeMeta(_ meta: BoardMeta) {
         guard let data = try? Self.encoder.encode(meta) else { return }
         try? data.write(to: folder(meta.id).appendingPathComponent("meta.json"), options: .atomic)
+    }
+
+    // MARK: 总结笔记
+
+    /// 上次存盘时纸上收成式子的东西。以前的草稿还没有这个文件：返回 nil。
+    func digest(_ id: UUID) -> NoteDigest? {
+        (try? Data(contentsOf: folder(id).appendingPathComponent("digest.json"))).flatMap { try? Self.decoder.decode(NoteDigest.self, from: $0) }
+    }
+
+    func saveSummary(_ id: UUID, _ s: NoteSummary) {
+        guard let data = try? Self.encoder.encode(s) else { return }
+        try? data.write(to: folder(id).appendingPathComponent("summary.json"), options: .atomic)
+        summaries[id] = s
+    }
+
+    /// 没有要点，或者总结以后草稿又改过了。
+    func summaryIsStale(_ meta: BoardMeta) -> Bool {
+        guard let s = summaries[meta.id] else { return true }
+        return meta.modified > s.created.addingTimeInterval(1)
+    }
+
+    /// 纸上没收成式子的手写截成一张白底的图（总结时发给模型看手写的字）。长边不超过 1600 像素。
+    func inkPNG(_ id: UUID) -> Data? {
+        guard let data = try? Data(contentsOf: folder(id).appendingPathComponent("drawing.data")),
+              let drawing = try? PKDrawing(data: data), !drawing.strokes.isEmpty else { return nil }
+        let bounds = drawing.bounds.insetBy(dx: -24, dy: -24)
+        let scale = min(2, 1600 / max(bounds.width, bounds.height, 1))
+        var ink: UIImage?
+        // 按浅色模式画：深色模式下黑墨会被画成白的
+        UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+            ink = drawing.image(from: bounds, scale: scale)
+        }
+        guard let ink else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let size = CGSize(width: (ink.size.width * ink.scale).rounded(), height: (ink.size.height * ink.scale).rounded())
+        let page = UIGraphicsImageRenderer(size: size, format: format).image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: size))
+            ink.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return page.pngData()
     }
 
     static let encoder: JSONEncoder = {
@@ -258,13 +325,25 @@ extension BoardLibrary {
             ("三角形", strokes(triangle), 220),
         ]
         let empty = BoardSnapshot(functions: [], shapes: [], geometries: [], lineNumbers: [:], scrollY: 0)
+        // 两份总结过的（看格子下面的要点）；其余的没总结过
+        let summaries: [String: [String]] = [
+            "函数与导数": ["f(x) = x³ − 5x 的导数是 f'(x) = 3x² − 5", "令 f'(x) = 0 得两个极值点 x = ±√(5/3)"],
+            "立体几何作业": ["画了一个正方体，看了主视、左视、俯视三视图", "棱长为 a 时表面积 6a²、体积 a³"],
+        ]
         for (title, ink, hoursAgo) in samples.reversed() {
             let meta = lib.create(title: title)
             let drawing = PKDrawing(strokes: ink)
+            let digest = try? encoder.encode(NoteDigest(title: title, lines: [], hasLooseInk: true))
             if let board = try? encoder.encode(empty) {
-                lib.write(meta.id, board: board, drawing: drawing.dataRepresentation(), thumbnail: BoardThumbnail.render(drawing))
+                lib.write(meta.id, board: board, drawing: drawing.dataRepresentation(), thumbnail: BoardThumbnail.render(drawing),
+                          digest: digest)
             }
-            lib.setDates(meta.id, modified: Date().addingTimeInterval(-hoursAgo * 3600))
+            let modified = Date().addingTimeInterval(-hoursAgo * 3600)
+            lib.setDates(meta.id, modified: modified)
+            if let points = summaries[title] {
+                lib.saveSummary(meta.id, NoteSummary(title: title, points: points, engine: NoteSummarizer.model,
+                                                     created: modified.addingTimeInterval(60)))
+            }
         }
         lib.reload()
         return lib

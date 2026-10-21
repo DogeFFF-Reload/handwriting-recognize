@@ -123,6 +123,22 @@ public struct GraphOverlay: Equatable, Identifiable {
     }
 }
 
+/// 两个函数画在同一张图里时选的区间：只看这一段里的交点，涂出两条曲线之间的面积。端点可以拖。
+public struct GraphRegion: Equatable {
+    public var from: Double
+    public var to: Double
+
+    public init(from: Double, to: Double) {
+        self.from = from
+        self.to = to
+    }
+
+    public var lower: Double { min(from, to) }
+    public var upper: Double { max(from, to) }
+
+    public func contains(_ x: Double) -> Bool { x >= lower - 1e-9 && x <= upper + 1e-9 }
+}
+
 @Observable
 public final class GraphModel {
     public enum Source {
@@ -146,6 +162,8 @@ public final class GraphModel {
     public private(set) var sliderSpan: Double = 5
     /// 求解标上的面积、点。
     public private(set) var overlays: [GraphOverlay] = []
+    /// 别的函数画进了这张图时选的区间（没有就是 nil：只标交点）。
+    public var region: GraphRegion?
 
     /// 换上（或加上）一条标注；新的标注落在视窗外时重新取景。
     public func setOverlay(_ o: GraphOverlay) {
@@ -256,6 +274,12 @@ public final class GraphModel {
                 xMin = min(xMin, x - 1.5)
                 xMax = max(xMax, x + 1.5)
             }
+        }
+        // 两个函数同图时选的区间也要在视窗里
+        if let r = region {
+            let pad = max(0.8, (r.upper - r.lower) * 0.25)
+            xMin = min(xMin, r.lower - pad)
+            xMax = max(xMax, r.upper + pad)
         }
         // 纵向：极值的大小优先；没有极值时按曲线在中间 60% 的取值（指数函数不会把整条线压扁在 x 轴上）
         var ys: [Double] = []

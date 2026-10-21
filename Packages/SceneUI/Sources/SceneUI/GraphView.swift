@@ -6,6 +6,8 @@ import SwiftUI
 /// - Pencil 悬停时读出曲线上那一点的坐标；轻点零点或极值点，钉住它的坐标。
 /// - reveal（第二幕改对）之后：极值点旁写出「极大值 (−1, 2)」、画水平切线和导函数，并出现可拖的切点（A9）。
 /// - `interactive == false`（卡片正处在变换状态）时不接手势，拖动交给外面的卡片。
+/// - `companions`：画进同一张图的别的函数。标出和它们的交点；model.region 有值时涂出区间里两条曲线之间的面积，
+///   区间两端的竖线可以拖（靠近交点时吸过去）。
 public struct FunctionGraphView: View {
     @Bindable var model: GraphModel
     var name: String
@@ -13,20 +15,33 @@ public struct FunctionGraphView: View {
     var interactive: Bool
     /// 简洁模式：只画网格、坐标轴和曲线（不标零点极值、不画导函数和切线、不涂积分面积、没有缩放按钮）。
     var minimal: Bool
+    var companions: [GraphCurve]
+    /// 交点坐标、面积写成什么样（App 用它认回 32/3、√2 这样的准确值）；nil 时写小数。
+    var valueText: ((Double) -> String)?
 
     @State private var lastDrag: CGSize?
     @State private var draggingProbe = false
+    /// 正在拖区间的哪一端（0 是 from，1 是 to）。
+    @State private var draggingBound: Int?
     @State private var zoomStart: GraphViewport?
     @State private var hover: CGPoint?
     @State private var pinned: GraphSpecialPoint?
 
-    public init(model: GraphModel, name: String = "f", tint: Color = .blue, interactive: Bool = true, minimal: Bool = false) {
+    public init(model: GraphModel, name: String = "f", tint: Color = .blue, interactive: Bool = true, minimal: Bool = false,
+                companions: [GraphCurve] = [], valueText: ((Double) -> String)? = nil) {
         self.model = model
         self.name = name
         self.tint = tint
         self.interactive = interactive
         self.minimal = minimal
+        self.companions = companions
+        self.valueText = valueText
     }
+
+    /// 别的函数改了系数、参数（拖滑条）时也要重画。
+    private var companionStamp: [Int] { companions.map { $0.model.revision } }
+
+    private func text(_ v: Double) -> String { valueText?(v) ?? GraphTicks.coordinate(v) }
 
     public var body: some View {
         GeometryReader { geo in
@@ -62,6 +77,9 @@ public struct FunctionGraphView: View {
                 if isNil { model.viewport = model.fittedViewport(for: size) }
             }
             .onChange(of: model.revision) { _, _ in pinned = nil }
+            // 画进来的函数拖了滑条、区间开关或拖了端点：都要重画
+            .onChange(of: companionStamp) { _, _ in pinned = nil }
+            .onChange(of: model.region) { _, _ in pinned = nil }
         }
     }
 
@@ -72,9 +90,15 @@ public struct FunctionGraphView: View {
             .onChanged { g in
                 if lastDrag == nil {
                     lastDrag = .zero
+                    let cur = model.viewport ?? vp
+                    // 从区间端点的竖线附近按下：拖端点
+                    if let r = model.region, !companions.isEmpty, !minimal {
+                        let da = abs(cur.point(r.from, 0, in: size).x - g.startLocation.x)
+                        let db = abs(cur.point(r.to, 0, in: size).x - g.startLocation.x)
+                        if min(da, db) < 22 { draggingBound = da <= db ? 0 : 1 }
+                    }
                     // 从切点附近按下：拖切点；否则平移
-                    if model.reveal, !minimal {
-                        let cur = model.viewport ?? vp
+                    if draggingBound == nil, model.reveal, !minimal {
                         let p = cur.point(probeX(cur, size), model.y(probeX(cur, size)), in: size)
                         draggingProbe = hypot(p.x - g.startLocation.x, p.y - g.startLocation.y) < 30
                     }
@@ -82,7 +106,11 @@ public struct FunctionGraphView: View {
                 let d = CGSize(width: g.translation.width - lastDrag!.width, height: g.translation.height - lastDrag!.height)
                 lastDrag = g.translation
                 let cur = model.viewport ?? vp
-                if draggingProbe {
+                if let bound = draggingBound, var r = model.region {
+                    let x = snappedBound(cur.value(at: g.location, in: size).x, vp: cur, size: size)
+                    if bound == 0 { r.from = x } else { r.to = x }
+                    model.region = r
+                } else if draggingProbe {
                     model.probeX = cur.value(at: g.location, in: size).x
                 } else if zoomStart == nil {
                     model.viewport = cur.panned(by: d)
@@ -91,7 +119,21 @@ public struct FunctionGraphView: View {
             .onEnded { _ in
                 lastDrag = nil
                 draggingProbe = false
+                draggingBound = nil
             }
+    }
+
+    /// 区间端点：离交点不到 10 pt 就吸到交点上，否则取到 0.1。
+    private func snappedBound(_ x: Double, vp: GraphViewport, size: CGSize) -> Double {
+        let xr = vp.xRange(size)
+        for c in companions {
+            for p in CurveMath.intersections(model.y, c.model.y, in: xr.lowerBound, xr.upperBound, samples: 600)
+            where abs(p - x) / vp.unitsPerPointX < 10 {
+                return p
+            }
+        }
+        let r = (x * 10).rounded() / 10
+        return r == 0 ? 0 : r
     }
 
     private func magnify(vp: GraphViewport, size: CGSize) -> some Gesture {
@@ -208,6 +250,10 @@ public struct FunctionGraphView: View {
 
         // 简洁模式：只要曲线
         if minimal {
+            for c in companions {
+                ctx.stroke(curve(size: size, vp: vp, c.model.y), with: .color(c.tint),
+                           style: StrokeStyle(lineWidth: 2.75, lineCap: .round, lineJoin: .round))
+            }
             ctx.stroke(curve(size: size, vp: vp, model.y), with: .color(tint),
                        style: StrokeStyle(lineWidth: 2.75, lineCap: .round, lineJoin: .round))
             return
@@ -216,6 +262,14 @@ public struct FunctionGraphView: View {
         // 定积分：曲线和 x 轴之间涂出来（曲线画在上面）
         for o in model.overlays {
             if case .area(let a, let b) = o.kind { drawArea(&ctx, size: size, vp: vp, from: a, to: b, label: o.label) }
+        }
+        // 两个函数同图：区间里两条曲线之间涂出来
+        if let r = model.region, let other = companions.first {
+            drawBetween(&ctx, size: size, vp: vp, region: r, other: other)
+        }
+        for c in companions {
+            ctx.stroke(curve(size: size, vp: vp, c.model.y), with: .color(c.tint),
+                       style: StrokeStyle(lineWidth: 2.75, lineCap: .round, lineJoin: .round))
         }
 
         // 导函数（reveal 后，绿色虚线）
@@ -246,6 +300,7 @@ public struct FunctionGraphView: View {
         }
 
         if model.reveal { drawReveal(&ctx, size: size, vp: vp, special: special, derivative: derivative) }
+        if !companions.isEmpty { drawIntersections(&ctx, size: size, vp: vp) }
 
         // 极限：趋向的点，画成空心圈，虚线连到两条坐标轴
         for o in model.overlays {
@@ -360,6 +415,77 @@ public struct FunctionGraphView: View {
         ctx.draw(t, at: CGPoint(x: box.midX, y: box.midY), anchor: .center)
     }
 
+    /// 区间 [a, b] 里两条曲线之间涂出来，两端画竖的虚线（底下写 a、b 的值，可以拖），上方写面积。
+    private func drawBetween(_ ctx: inout GraphicsContext, size: CGSize, vp: GraphViewport, region r: GraphRegion, other: GraphCurve) {
+        let xr = vp.xRange(size)
+        let lo = max(r.lower, xr.lowerBound), hi = min(r.upper, xr.upperBound)
+        if hi > lo {
+            let n = max(Int(vp.point(hi, 0, in: size).x - vp.point(lo, 0, in: size).x) / 2, 8)
+            var band = Path()
+            func clamp(_ q: CGPoint) -> CGPoint { CGPoint(x: q.x, y: min(max(q.y, -size.height), size.height * 2)) }
+            for i in 0...n {
+                let x = lo + (hi - lo) * Double(i) / Double(n)
+                let y = model.y(x)
+                let q = clamp(vp.point(x, y.isFinite ? y : 0, in: size))
+                if i == 0 { band.move(to: q) } else { band.addLine(to: q) }
+            }
+            for i in stride(from: n, through: 0, by: -1) {
+                let x = lo + (hi - lo) * Double(i) / Double(n)
+                let y = other.model.y(x)
+                band.addLine(to: clamp(vp.point(x, y.isFinite ? y : 0, in: size)))
+            }
+            band.closeSubpath()
+            ctx.fill(band, with: .color(GraphPalette.result.opacity(0.2)))
+        }
+        let ends: [(String, Double)] = [("a", r.lower), ("b", r.upper)]
+        for (letter, x) in ends where xr.contains(x) {
+            let px = vp.point(x, 0, in: size).x
+            var edge = Path()
+            edge.move(to: CGPoint(x: px, y: 0))
+            edge.addLine(to: CGPoint(x: px, y: size.height))
+            ctx.stroke(edge, with: .color(GraphPalette.result.opacity(0.75)), style: StrokeStyle(lineWidth: 1.4, dash: [5, 4]))
+            let t = ctx.resolve(Text(letter + " = " + text(x)).font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(.white))
+            let m = t.measure(in: CGSize(width: 200, height: 30))
+            let box = CGRect(x: min(max(px - m.width / 2 - 7, 2), size.width - m.width - 16), y: size.height - m.height - 12,
+                             width: m.width + 14, height: m.height + 6)
+            ctx.fill(Path(roundedRect: box, cornerRadius: box.height / 2), with: .color(GraphPalette.result))
+            ctx.draw(t, at: CGPoint(x: box.midX, y: box.midY), anchor: .center)
+        }
+        guard let s = CurveMath.areaBetween(model.y, other.model.y, from: r.lower, to: r.upper) else { return }
+        let mid = vp.point((r.lower + r.upper) / 2, 0, in: size)
+        let t = ctx.resolve(Text("两曲线之间 S = " + text(s)).font(.system(size: 12, weight: .bold, design: .rounded))
+            .foregroundStyle(GraphPalette.result))
+        let m = t.measure(in: CGSize(width: 300, height: 40))
+        let box = CGRect(x: min(max(mid.x - m.width / 2 - 6, 4), size.width - m.width - 16), y: 8,
+                         width: m.width + 12, height: m.height + 6)
+        ctx.fill(Path(roundedRect: box, cornerRadius: 6), with: .color(Color(.systemBackground).opacity(0.92)))
+        ctx.draw(t, at: CGPoint(x: box.midX, y: box.midY), anchor: .center)
+    }
+
+    /// 和画进来的函数的交点：实心点；在选的区间里（或者没选区间）的写出坐标。
+    private func drawIntersections(_ ctx: inout GraphicsContext, size: CGSize, vp: GraphViewport) {
+        let xr = vp.xRange(size)
+        var labelled = 0
+        for c in companions {
+            let xs = CurveMath.intersections(model.y, c.model.y, in: xr.lowerBound, xr.upperBound, samples: 600)
+            for x in xs.prefix(8) {
+                let y = model.y(x)
+                guard y.isFinite else { continue }
+                let q = vp.point(x, y, in: size)
+                guard q.y > -10, q.y < size.height + 10 else { continue }
+                let inside = model.region.map { $0.contains(x) } ?? true
+                let dot = Path(ellipseIn: CGRect(x: q.x - 5.5, y: q.y - 5.5, width: 11, height: 11))
+                ctx.fill(dot, with: .color(inside ? Color.primary : Color.secondary.opacity(0.6)))
+                ctx.stroke(dot, with: .color(Color(.systemBackground)), lineWidth: 2)
+                if inside, labelled < 4 {
+                    bubble(&ctx, "交点 (" + text(x) + ", " + text(y) + ")", near: q, size: size, color: .primary)
+                    labelled += 1
+                }
+            }
+        }
+    }
+
     /// 按每 1.5 pt 取一个样本连成曲线；跨过渐近线（相邻两点差出好几屏）时断开。
     private func curve(size: CGSize, vp: GraphViewport, _ f: (Double) -> Double) -> Path {
         var path = Path()
@@ -391,6 +517,19 @@ public struct FunctionGraphView: View {
         ctx.fill(shape, with: .color(Color(.systemBackground).opacity(0.94)))
         ctx.stroke(shape, with: .color(color.opacity(0.35)), lineWidth: 1)
         ctx.draw(t, at: CGPoint(x: box.midX, y: box.midY), anchor: .center)
+    }
+}
+
+/// 画进同一张图的另一条函数（两个函数同图：比较曲线、标交点、涂两曲线之间的面积）。
+public struct GraphCurve {
+    public var name: String
+    public var tint: Color
+    public var model: GraphModel
+
+    public init(name: String, tint: Color, model: GraphModel) {
+        self.name = name
+        self.tint = tint
+        self.model = model
     }
 }
 

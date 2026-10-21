@@ -6,9 +6,10 @@ import SwiftUI
 
 /// 双击笔身后在笔尖旁选的处理。
 /// 「求解」把求导、积分、极限、求和、解方程合在一起：写的是什么就算什么（f'(x)、\int_0^2 f(x)dx、\lim…、\sum…、x^2-4=0）。
-/// 「矩阵」只在识别结果里真有矩阵时出现，点开是计算 / 求逆 / 求行列式。
+/// 「检查」只看学生自己写的这一步对不对（首版是多项式求导 f'(x) = …）：笔迹留着，有问题的地方画圈，提示自己点开。
+/// 「矩阵」只在识别结果里真有矩阵时出现，点开是计算 / 求逆 / 求行列式 / 看变换。
 enum SegmentKind: String, CaseIterable, Identifiable {
-    case function, solve, geometry, matrix
+    case function, solve, check, geometry, matrix
 
     var id: String { rawValue }
 
@@ -16,6 +17,7 @@ enum SegmentKind: String, CaseIterable, Identifiable {
         switch self {
         case .function: return "函数"
         case .solve: return "求解"
+        case .check: return "检查"
         case .geometry: return "几何"
         case .matrix: return "矩阵"
         }
@@ -25,15 +27,16 @@ enum SegmentKind: String, CaseIterable, Identifiable {
         switch self {
         case .function: return "收成标准式子并作图"
         case .solve: return "求导、积分、极限、求和、解方程，直接算出结果"
+        case .check: return "看这一步对不对：先圈出有问题的地方，提示自己点开"
         case .geometry: return "收成动态几何"
-        case .matrix: return "计算、求逆矩阵、求行列式"
+        case .matrix: return "计算、求逆矩阵、求行列式、看变换"
         }
     }
 
     var mode: InkMode {
         switch self {
         case .function: return .function
-        case .solve: return .derivative   // 回放脚本里求导那几行记在 derivative 下
+        case .solve, .check: return .derivative   // 回放脚本里求导那几行记在 derivative 下
         case .geometry: return .geometry
         case .matrix: return .function
         }
@@ -67,6 +70,8 @@ struct SegmentMenuState: Equatable {
     var segment: InkSegment
     /// 识别结果里有矩阵时才多一枚「矩阵」。
     var offersMatrix = false
+    /// 认出来的是 2×2 的数字矩阵：二级菜单里多一个「看变换」。
+    var offersTransform = false
     /// 「矩阵」的二级菜单展开着。
     var matrixOpen = false
     /// 双击时先认的一遍。有结果就复用，不再打第二次模型。
@@ -152,6 +157,15 @@ final class FunctionItem: Identifiable {
     /// 「求解」：学生写的那一行（引用的函数改了就拿它重新算）和算出来的结果。
     var solveSource: String?
     var solution: Solution?
+    /// 矩阵菜单里选的是哪一种（存盘：重新打开时照这个重算，求逆不会变回计算）。
+    var matrixAction: MatrixAction?
+    /// 「看变换」：卡片里现在的矩阵（拖基向量会改）和刚认出来时的矩阵（「复位」回到它）。
+    var linearMap: LinearMap2?
+    var originalMap: LinearMap2?
+    /// 画在这张卡片里的其他函数（两个函数同图：比较曲线、标交点、涂两曲线之间的面积）。
+    var companions: [UUID] = []
+    /// 这条函数画在别的函数的卡片里（自己的卡片不显示）。
+    var mergedInto: UUID?
 
     init(lineID: String, latex: String, origin: CGPoint, fontSize: CGFloat, size: CGSize, card: CardFrame, tint: Color) {
         self.lineID = lineID
@@ -189,6 +203,42 @@ final class FunctionItem: Identifiable {
         latex = lhs + "=" + Poly.latex(terms)
         size = MathLabel.measure(latex, fontSize: fontSize)
         if let parsed = try? FunctionDefinition.parse(latex) { definition = parsed }
+    }
+}
+
+/// 「检查」过的一行。学生的笔迹留在纸上：有问题的地方画红圈，提示一级一级自己点开（反问 → 规则 → 答案）；
+/// 全对时行尾一个绿勾。圈出来以后这一行又改过（擦了、在旁边写了），圈就变淡，等学生改完再检查一次。不存盘。
+@Observable
+final class CheckItem: Identifiable {
+    let id = UUID()
+    /// 识别器和回放用的行号 C1、C2…：同一行改完再检查沿用（回放按「擦过几轮」取）。
+    let lineID: String
+    var revision: Int
+    /// 检查时这一行的笔。
+    var strokeIDs: Set<String>
+    var bounds: CGRect
+    var result: StepReview.Result
+    /// 对照的是哪条函数。
+    var functionName: String
+    /// 每一处问题打开到了第几级提示（0：只圈出来）。
+    var levels: [Int]
+    /// 正在看提示的是第几处（nil：提示收着）。
+    var focus: Int?
+    /// 圈出来以后这一行又改过了。
+    var stale = false
+    /// 认出来的这一行（对了以后「收成式子」用）。
+    var recognized: RecognitionResult
+
+    init(lineID: String, revision: Int, strokeIDs: Set<String>, bounds: CGRect, result: StepReview.Result,
+         functionName: String, recognized: RecognitionResult) {
+        self.lineID = lineID
+        self.revision = revision
+        self.strokeIDs = strokeIDs
+        self.bounds = bounds
+        self.result = result
+        self.functionName = functionName
+        self.levels = Array(repeating: 0, count: result.issues.count)
+        self.recognized = recognized
     }
 }
 

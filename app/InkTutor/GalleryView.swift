@@ -1,9 +1,12 @@
+import InkCore
 import SwiftUI
 
 /// 草稿画廊（参考无边记）：所有手写草稿按修改时间排成一格一格的缩略图。
-/// 点一下打开；长按：重命名、复制一份、删除；右上角新建、排序；可以搜索名字。
+/// 点一下打开；长按：重命名、复制一份、总结内容、删除；右上角新建、排序；可以搜索名字。
+/// 刚离开的草稿在底下问一句「总结内容」（点了才调 qwen3.8-max），总结出的第一条要点写在格子下面。
 struct GalleryView: View {
     @Bindable var library: BoardLibrary
+    @Bindable var summaries: SummaryCenter
     var onOpen: (BoardMeta) -> Void
 
     @State private var query = ""
@@ -41,7 +44,8 @@ struct GalleryView: View {
                     NewBoardTile { onOpen(library.create()) }
                 }
                 ForEach(shown) { meta in
-                    BoardTile(meta: meta, thumbnail: library.thumbnail(meta.id), version: library.thumbnailVersion)
+                    BoardTile(meta: meta, thumbnail: library.thumbnail(meta.id), version: library.thumbnailVersion,
+                              summary: library.summaries[meta.id], stale: library.summaryIsStale(meta))
                         .onTapGesture { onOpen(meta) }
                         .contextMenu {
                             Button { onOpen(meta) } label: { Label("打开", systemImage: "arrow.up.forward.app") }
@@ -50,6 +54,16 @@ struct GalleryView: View {
                                 renaming = meta
                             } label: { Label("重命名", systemImage: "pencil") }
                             Button { library.duplicate(meta) } label: { Label("复制一份", systemImage: "plus.square.on.square") }
+                            Divider()
+                            if library.summaries[meta.id] != nil {
+                                Button { summaries.showing = meta } label: { Label("查看要点", systemImage: "list.bullet") }
+                            }
+                            Button {
+                                summaries.offered = meta.id
+                                summaries.summarize(meta.id)
+                            } label: {
+                                Label(library.summaries[meta.id] == nil ? "总结内容" : "重新总结", systemImage: "sparkles")
+                            }
                             Divider()
                             Button(role: .destructive) { deleting = meta } label: { Label("删除", systemImage: "trash") }
                         }
@@ -92,6 +106,16 @@ struct GalleryView: View {
                 ContentUnavailableView.search(text: query)
             }
         }
+        .overlay(alignment: .bottom) {
+            if let id = summaries.offered, let meta = library.meta(id) {
+                SummaryBanner(center: summaries, meta: meta)
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .sheet(item: $summaries.showing) { meta in
+            SummarySheet(center: summaries, meta: meta)
+        }
         .alert("重命名", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("草稿名字", text: $newName)
             Button("好") {
@@ -112,12 +136,15 @@ struct GalleryView: View {
     }
 }
 
-/// 一份草稿：缩略图 + 名字 + 什么时候改的。
+/// 一份草稿：缩略图 + 名字 + 什么时候改的；总结过的话下面一条要点。
 private struct BoardTile: View {
     var meta: BoardMeta
     var thumbnail: UIImage?
     /// 缩略图换了就重画。
     var version: Int
+    var summary: NoteSummary?
+    /// 总结以后又改过。
+    var stale: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -149,9 +176,21 @@ private struct BoardTile: View {
                 Text(meta.title)
                     .font(.headline)
                     .lineLimit(1)
-                Text(Self.when(meta.modified))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(Self.when(meta.modified))
+                    if summary != nil, stale {
+                        Text("总结后改过").foregroundStyle(Theme.warn)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                if let point = summary?.points.first {
+                    Label(point, systemImage: "sparkles")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .padding(.top, 3)
+                }
             }
             .padding(.horizontal, 4)
         }

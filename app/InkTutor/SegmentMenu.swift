@@ -1,8 +1,8 @@
 import InkCore
 import SwiftUI
 
-/// 双击笔身后在笔尖旁弹出的菜单：函数 / 求解 / 几何。
-/// 识别结果里有矩阵时再加一枚「矩阵」，点开是计算、求逆矩阵、求行列式。
+/// 双击笔身后在笔尖旁弹出的菜单：函数 / 求解 / 检查 / 几何。
+/// 识别结果里有矩阵时再加一枚「矩阵」，点开是计算、求逆矩阵、求行列式（2×2 的还有看变换）。
 ///
 /// 圆钮沿笔尖上方的一段圆弧展开（右手握笔时手在笔尖右下，不会挡住）；
 /// 笔尖离顶太近就翻到下方。要处理的那一段笔迹用流动的虚线框标出来。
@@ -24,10 +24,15 @@ struct SegmentMenu: View {
     private var size: CGFloat { compact ? 46 : 64 }
 
     private var kinds: [SegmentKind] {
-        var list: [SegmentKind] = [.function, .solve]
+        var list: [SegmentKind] = [.function, .solve, .check]
         if state.offersMatrix { list.append(.matrix) }
         list.append(.geometry)
         return list
+    }
+
+    /// 矩阵的二级菜单：2×2 的数字矩阵才有「看变换」。
+    private var matrixActions: [MatrixAction] {
+        MatrixAction.allCases.filter { $0 != .transform || state.offersTransform }
     }
 
     var body: some View {
@@ -65,10 +70,11 @@ struct SegmentMenu: View {
             }
 
             if state.matrixOpen, let index = kinds.firstIndex(of: .matrix) {
-                let actions = submenuSpots(from: spots[index])
-                ForEach(Array(MatrixAction.allCases.enumerated()), id: \.element) { i, action in
+                let actions = matrixActions
+                let places = submenuSpots(from: spots[index], count: actions.count)
+                ForEach(Array(actions.enumerated()), id: \.element) { i, action in
                     matrixAction(action)
-                        .position(actions[i])
+                        .position(places[i])
                         .transition(.scale(scale: 0.7).combined(with: .opacity))
                 }
             }
@@ -80,7 +86,7 @@ struct SegmentMenu: View {
         }
     }
 
-    /// 圆钮绕笔尖展开成扇形。三个时间隔 50°，多了「矩阵」就稍收一点。
+    /// 圆钮绕笔尖展开成扇形。三个时间隔 50°，四五个时收到 42°。
     /// 优先往右上方展开，选第一个既不压住这段笔迹、也不出屏幕、不钻到工具栏下面的。
     private func fan(_ count: Int) -> [CGPoint] {
         let a = state.anchor
@@ -110,8 +116,8 @@ struct SegmentMenu: View {
         }
     }
 
-    /// 二级菜单从「矩阵」再往外排开，不盖住那一圈主按钮。
-    private func submenuSpots(from matrix: CGPoint) -> [CGPoint] {
+    /// 二级菜单从「矩阵」再往外排开，不盖住那一圈主按钮。按钮之间隔 128（四个时收到 124）。
+    private func submenuSpots(from matrix: CGPoint, count: Int) -> [CGPoint] {
         let vx = matrix.x - state.anchor.x
         let vy = matrix.y - state.anchor.y
         let len = max(1, hypot(vx, vy))
@@ -120,8 +126,10 @@ struct SegmentMenu: View {
         let sx = -uy
         let sy = ux
         let center = CGPoint(x: matrix.x + ux * 108, y: matrix.y + uy * 108)
-        return (-1...1).map { i in
-            let p = CGPoint(x: center.x + sx * CGFloat(i) * 128, y: center.y + sy * CGFloat(i) * 128)
+        let gap: CGFloat = count > 3 ? 124 : 128
+        return (0..<count).map { (i: Int) -> CGPoint in
+            let k = CGFloat(i) - CGFloat(count - 1) / 2
+            let p = CGPoint(x: center.x + sx * k * gap, y: center.y + sy * k * gap)
             return CGPoint(x: min(max(p.x, visible.minX + 64), visible.maxX - 64),
                            y: min(max(p.y, visible.minY + topInset + 22), visible.maxY - 22))
         }
@@ -183,6 +191,7 @@ struct SegmentMenu: View {
         case .calculate: return "计算"
         case .inverse: return "求逆矩阵"
         case .determinant: return "求行列式"
+        case .transform: return "看变换"
         }
     }
 
@@ -191,6 +200,7 @@ struct SegmentMenu: View {
         case .calculate: return "plus.forwardslash.minus"
         case .inverse: return "arrow.uturn.backward"
         case .determinant: return "number"
+        case .transform: return "square.on.square.dashed"
         }
     }
 
@@ -203,6 +213,8 @@ struct SegmentMenu: View {
                 Text("∫").font(.system(size: 22, design: .serif).italic())
                 Text("Σ").font(.system(size: 13, design: .serif)).baselineOffset(-1)
             }
+        case .check:
+            Image(systemName: "checkmark.circle").font(.system(size: 19, weight: .medium))
         case .geometry:
             Image(systemName: "triangle").font(.system(size: 18, weight: .medium))
         case .matrix:

@@ -12,6 +12,7 @@ enum Board {
 /// - 点标题栏：选中，出现变换框。选中时：拖卡片任意处移动；拖四角 / 四边的手柄改大小（对角 / 对边不动）；
 ///   拖上方的圆形手柄旋转（靠近 0°、90°、180°、270° 时吸附）；双指捏合缩放、双指转动旋转。
 /// - 没选中时，卡片里的内容自己接手势（函数图像拖动平移、双指缩放）。
+/// - 拖完松手时调 onMoveEnded（函数卡片用它判断是不是拖到了另一张函数卡片上，合成一张图）。
 struct TransformableCard<Header: View, Content: View>: View {
     @Binding var frame: CardFrame
     var selected: Bool
@@ -19,6 +20,8 @@ struct TransformableCard<Header: View, Content: View>: View {
     var onSelect: () -> Void
     @ViewBuilder var header: () -> Header
     @ViewBuilder var content: (_ interactive: Bool) -> Content
+    /// 放在 content 后面：前面的尾随闭包照样按 header、content 对上。
+    var onMoveEnded: (() -> Void)? = nil
 
     @State private var start: CardFrame?
     @State private var readout: String?
@@ -72,7 +75,10 @@ struct TransformableCard<Header: View, Content: View>: View {
                 guard let s = start else { return }
                 frame.center = CGPoint(x: s.center.x + g.translation.width, y: s.center.y + g.translation.height)
             }
-            .onEnded { _ in start = nil }
+            .onEnded { _ in
+                start = nil
+                onMoveEnded?()
+            }
     }
 
     private var pinchGesture: some Gesture {
@@ -233,15 +239,17 @@ private extension CGPoint {
 
 // MARK: - 函数卡片
 
-/// 式子右上角的函数图像卡片。
+/// 式子右上角的函数图像卡片。别的函数可以画进来（标题栏的「叠加」，或者把那张卡片拖到这张上面松手）：
+/// 两条曲线同图，标出交点，在选的区间里涂出两条曲线之间的面积；拖滑条时交点和面积跟着变。
 struct FunctionCard: View {
     @Bindable var item: FunctionItem
     var app: AppModel
 
     var body: some View {
-        if let graph = item.graph {
+        if let graph = item.graph, item.mergedInto == nil {
+            let others = app.companions(of: item)
             if item.card.minimized {
-                CardPill(tint: item.tint, title: "\(item.name)(x)") {
+                CardPill(tint: item.tint, title: ([item] + others).map { "\($0.name)(x)" }.joined(separator: "、")) {
                     withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { item.card.minimized = false }
                 }
                 .pinned(.bottomLeading, at: CGPoint(x: item.anchor.x + 10, y: item.anchor.y - 2))
@@ -249,19 +257,35 @@ struct FunctionCard: View {
             } else {
                 TransformableCard(frame: $item.card, selected: app.selection == .card(item.id), dimmed: item.showingInk,
                                   onSelect: { toggleSelection() }) {
-                    header(graph)
+                    header(graph, others: others)
                 } content: { interactive in
                     VStack(spacing: 0) {
                         FunctionGraphView(model: graph, name: item.name, tint: item.tint, interactive: interactive && !item.showingInk,
-                                          minimal: item.minimal)
-                        if item.showsSliders, graph.hasSliders, !item.minimal {
+                                          minimal: item.minimal, companions: curves(others), valueText: AppModel.graphValue)
+                        if item.showsSliders, hasSliders(graph, others), !item.minimal {
                             Rectangle().fill(Theme.hairline).frame(height: 1)
-                            GraphSliders(model: graph, tint: item.tint) { app.coefficientsChanged(item) }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 6)
-                                .allowsHitTesting(interactive)
+                            VStack(spacing: 0) {
+                                if graph.hasSliders {
+                                    GraphSliders(model: graph, tint: item.tint) { app.coefficientsChanged(item) }
+                                }
+                                ForEach(others) { f in
+                                    if let g = f.graph, g.hasSliders {
+                                        Text("\(f.name)(x)")
+                                            .font(.system(size: 12, design: .serif).italic())
+                                            .foregroundStyle(f.tint)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.top, 2)
+                                        GraphSliders(model: g, tint: f.tint) { app.coefficientsChanged(f) }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .allowsHitTesting(interactive)
                         }
                     }
+                } onMoveEnded: {
+                    app.cardDropped(item)
                 }
                 .overlay {
                     if item.showingInk {
@@ -284,11 +308,36 @@ struct FunctionCard: View {
         }
     }
 
-    private func header(_ graph: GraphModel) -> some View {
+    private func curves(_ others: [FunctionItem]) -> [GraphCurve] {
+        others.compactMap { f in f.graph.map { GraphCurve(name: f.name, tint: f.tint, model: $0) } }
+    }
+
+    private func hasSliders(_ graph: GraphModel, _ others: [FunctionItem]) -> Bool {
+        graph.hasSliders || others.contains { $0.graph?.hasSliders ?? false }
+    }
+
+    /// 滑条一共几行（展开滑条时卡片要多高）。
+    private func sliderRows(_ graph: GraphModel, _ others: [FunctionItem]) -> Int {
+        let models = [graph] + others.compactMap(\.graph)
+        return models.reduce(0) { total, g in total + (g.terms?.count ?? g.params.count) } + others.count
+    }
+
+    private func header(_ graph: GraphModel, others: [FunctionItem]) -> some View {
         HStack(spacing: 8) {
             CurveGlyph(tint: item.tint)
             if item.minimal {
                 Spacer(minLength: 0)
+            } else if !others.isEmpty {
+                // 几条函数同图：标题栏是图例
+                HStack(spacing: 10) {
+                    ForEach([item] + others) { f in
+                        HStack(spacing: 4) {
+                            Capsule().fill(f.tint).frame(width: 14, height: 3)
+                            Text("\(f.name)(x)").font(.system(size: 14, design: .serif).italic())
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 MathLabel(item.latex, fontSize: 15, color: .label)
                     .fixedSize()
@@ -296,6 +345,13 @@ struct FunctionCard: View {
                     .mask(LinearGradient(stops: [.init(color: .black, location: 0.85), .init(color: .clear, location: 1)],
                                          startPoint: .leading, endPoint: .trailing))
                     .clipped()
+            }
+            if !item.minimal { overlayMenu(graph, others: others) }
+            if !others.isEmpty, !item.minimal {
+                HeaderButton(systemImage: "arrow.left.and.right", active: graph.region != nil,
+                             help: graph.region == nil ? "选一个区间：看两曲线之间的面积" : "不看区间") {
+                    app.toggleRegion(item)
+                }
             }
             if graph.reveal, !item.minimal {
                 // 图例：绿色虚线是导函数
@@ -312,11 +368,11 @@ struct FunctionCard: View {
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .background(Theme.ok.opacity(0.12), in: Capsule())
             }
-            if graph.hasSliders, !item.minimal {
+            if hasSliders(graph, others), !item.minimal {
                 HeaderButton(systemImage: "slider.horizontal.3", active: item.showsSliders, help: "参数滑条") {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                         if !item.showsSliders {
-                            let rows = CGFloat(graph.terms?.count ?? graph.params.count)
+                            let rows = CGFloat(sliderRows(graph, others))
                             item.card.size.height = max(item.card.size.height, 252 + rows * 30 + 12)
                         }
                         item.showsSliders.toggle()
@@ -337,6 +393,39 @@ struct FunctionCard: View {
         }
         .padding(.leading, 12)
         .padding(.trailing, 6)
+    }
+
+    /// 「叠加」：把纸上别的函数画进这张图，或者把画进来的拿出去。纸上只有这一条函数时不出现。
+    @ViewBuilder private func overlayMenu(_ graph: GraphModel, others: [FunctionItem]) -> some View {
+        let candidates = app.mergeCandidates(for: item)
+        if !candidates.isEmpty || !others.isEmpty {
+            Menu {
+                if !candidates.isEmpty {
+                    Section("画进这张图") {
+                        ForEach(candidates) { f in
+                            Button { app.merge(f, into: item) } label: { Label("\(f.name)(x)", systemImage: "plus") }
+                        }
+                    }
+                }
+                if !others.isEmpty {
+                    Section("拿出去，单独作图") {
+                        ForEach(others) { f in
+                            Button { app.unmerge(f) } label: { Label("\(f.name)(x)", systemImage: "minus") }
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "square.on.square")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(others.isEmpty ? Color.secondary : Theme.accent)
+                    .frame(width: 32, height: 32)
+                    .background(others.isEmpty ? Color.clear : Theme.accent.opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .contentShape(Rectangle())
+            }
+            .menuOrder(.fixed)
+            .accessibilityLabel("叠加别的函数")
+        }
     }
 }
 
