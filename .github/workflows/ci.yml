@@ -43,11 +43,15 @@ jobs:
         run: |
           printf 'machine api.github.com\n  login x-access-token\n  password %s\n' "${{ github.token }}" > ~/.netrc
           chmod 600 ~/.netrc
+      # 真机上的 App 横竖屏都行、可以缩成窗口；模拟器截图这一份锁成横屏全屏，画面和 README 里的截图一致
       - name: Build app for iOS Simulator
         run: |
           xcodebuild -project app/InkTutor.xcodeproj -scheme InkTutor \
             -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 || true
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            INFOPLIST_KEY_UIRequiresFullScreen=YES \
+            INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad="UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight" \
+            build > build.log 2>&1 || true
           grep -E "error:|BUILD (SUCCEEDED|FAILED)|iink SDK 没有编进来" build.log | sed -E 's#/Users/runner/work/[^ ]*/(Packages|app)/#\1/#' | sort -u | head -80
           grep -q "BUILD SUCCEEDED" build.log
       # 不用真机看界面：在 iPad 模拟器上用 -demo 摆出几个画面截图（浅色 + 深色），作为 artifact 下载
