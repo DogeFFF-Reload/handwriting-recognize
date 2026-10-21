@@ -132,6 +132,21 @@ final class SolverTests: XCTestCase {
 
     // MARK: 求和
 
+    func testScreenshotSums() {
+        // 识别器把上界 10 拆开时，不能乘成 0（空和）
+        check("\\sum_{x=1}^{10}x", "55")
+        check("\\sum_{i=1}^{10}i", "55")
+        check("\\sum_{x=1}^10 x", "55")
+        check("\\sum_{x=1}^{1 0}x", "55")
+        check("\\sum_{x=1}^{1{0}}x", "55")
+        check("\\sum_{x=1}^{{1}{0}}x", "55")
+        check("\\int_0^10 x\\,dx", "50")
+        let sq = try! FunctionDefinition.parse("f(x)=x^2")
+        check("\\sum_{x=1}^{3}f(x)", "14", functions: ["f": sq])
+        check("\\sum_{x=1}^{10}f(x)", "385", functions: ["f": sq])
+        check("\\sum_{x=1}^{1 0}f\\left( x\\right)", "385", functions: ["f": sq])
+    }
+
     func testFiniteSums() {
         check("\\sum_{k=1}^{100}k", "5050")
         check("\\sum _{k=1}^{10}\\frac{1}{k}", "\\frac{7381}{2520}")
