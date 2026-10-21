@@ -10,12 +10,15 @@ struct SegmentMenu: View {
     /// 看得见的那块纸（画布坐标）：圆钮不放到屏幕外、不钻到工具栏下面。
     var visible: CGRect
     var topInset: CGFloat
+    /// 窗口化时整个菜单小一号。
+    var compact = false
     var onChoose: (SegmentKind) -> Void
 
     @State private var shown = false
     @State private var phase: CGFloat = 0
 
-    private let radius: CGFloat = 92
+    private var radius: CGFloat { compact ? 68 : 92 }
+    private var size: CGFloat { compact ? 46 : 64 }
 
     var body: some View {
         ZStack {
@@ -63,7 +66,7 @@ struct SegmentMenu: View {
     private func fan() -> [CGPoint] {
         let a = state.anchor
         let ink = state.segment.bounds.insetBy(dx: -8, dy: -8)
-        let half: CGFloat = 34
+        let half: CGFloat = size / 2 + 2
         func spots(_ center: Double) -> [CGPoint] {
             [-50.0, 0, 50].map { d in
                 let t = (center + d) * .pi / 180
@@ -93,12 +96,13 @@ struct SegmentMenu: View {
         } label: {
             VStack(spacing: 1) {
                 glyph(kind)
-                    .frame(height: 24)
+                    .frame(height: compact ? 17 : 24)
+                    .scaleEffect(compact ? 0.75 : 1)
                 Text(kind.title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: compact ? 9 : 11, weight: .semibold))
             }
             .foregroundStyle(primary ? Color.white : Color.primary)
-            .frame(width: 64, height: 64)
+            .frame(width: size, height: size)
             .background {
                 if primary {
                     Circle().fill(Theme.accent)

@@ -74,19 +74,14 @@ struct BoardScreen: View {
                                  allowFinger: allowFinger, contentHeight: app.contentHeight)
                     if !app.hasInk, app.functions.isEmpty, app.geometries.isEmpty, app.shapes.isEmpty {
                         EmptyBoardHint()
+                            .scaleEffect(app.compact ? 0.78 : 1)
                             .position(x: geo.size.width / 2, y: geo.size.height * 0.46)
                             .transition(.opacity)
                     }
                     ScrollingOverlay(app: app)
                 }
-                .onAppear {
-                    app.boardSize = geo.size
-                    app.growPage()
-                }
-                .onChange(of: geo.size) { _, s in
-                    app.boardSize = s
-                    app.growPage()
-                }
+                .onAppear { resized(geo.size) }
+                .onChange(of: geo.size) { _, s in resized(s) }
             }
             .ignoresSafeArea()
 
@@ -127,6 +122,17 @@ struct BoardScreen: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { save(thumbnail: true) }
         }
+    }
+
+    /// 窗口大小变了：记下来，窗口比屏幕小（台前调度、分屏）或者很窄就换成小号的工具栏。
+    private func resized(_ size: CGSize) {
+        app.boardSize = size
+        let screen = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.size ?? size
+        let windowed = size.width < screen.width - 40 || size.height < screen.height - 40
+        withAnimation(.easeInOut(duration: 0.2)) {
+            app.compact = demo == "compact" || windowed || size.width < 900
+        }
+        app.growPage()
     }
 
     private func startRename() {

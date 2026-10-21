@@ -32,6 +32,7 @@ struct BoardOverlay: View {
             // 式子的操作条画在卡片上面，不会被挂在右上角的卡片挡住
             if case .formula(let id)? = app.selection, let item = app.functions.first(where: { $0.id == id }), !item.showingInk {
                 FormulaActionBar(item: item, app: app)
+                    .scaleEffect(app.compact ? 0.86 : 1, anchor: .bottomLeading)
                     .pinned(.bottomLeading, at: CGPoint(x: item.frame.minX - 10, y: item.frame.minY - 14))
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
@@ -40,6 +41,7 @@ struct BoardOverlay: View {
             if case .shape(let id)? = app.selection, let item = app.shapes.first(where: { $0.id == id }) {
                 ShapeHandles(item: item, app: app)
                 ShapeInfoBar(item: item, app: app)
+                    .scaleEffect(app.compact ? 0.86 : 1, anchor: infoBarAlignment(item) == .topLeading ? .topLeading : .bottomLeading)
                     .pinned(infoBarAlignment(item), at: infoBarAnchor(item))
                     .transition(.opacity.combined(with: .offset(y: 6)))
             }
@@ -47,7 +49,7 @@ struct BoardOverlay: View {
             ForEach(app.busy) { BusyOverlay(job: $0) }
 
             if let menu = app.menu {
-                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInset) { app.choose($0) }
+                SegmentMenu(state: menu, visible: app.visibleRect, topInset: app.topInset, compact: app.compact) { app.choose($0) }
                     .transition(.opacity)
             }
 

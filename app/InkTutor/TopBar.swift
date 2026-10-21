@@ -17,13 +17,99 @@ struct TopBar: View {
     @State private var confirmClear = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            boardGroup
-            penGroup
-            Spacer(minLength: 0)
-            actionGroup
+        if app.compact {
+            // 窗口化：右上角一枚小胶囊，左上角留给窗口按钮
+            HStack {
+                Spacer(minLength: 0)
+                compactGroup
+            }
+            .padding(.horizontal, 10)
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                boardGroup
+                penGroup
+                Spacer(minLength: 0)
+                actionGroup
+            }
+            .padding(.horizontal, 16)
         }
-        .padding(.horizontal, 16)
+    }
+
+    /// 名字太长时截短（胶囊不跟着名字变宽）。
+    private var shortTitle: String {
+        title.count > 14 ? String(title.prefix(13)) + "…" : title
+    }
+
+    // MARK: 窗口化：只留笔、橡皮、清空、设置
+
+    private var compactGroup: some View {
+        HStack(spacing: 2) {
+            SmallToolButton(systemImage: "pencil.tip", help: "笔", selected: !app.eraserOn, dot: app.penColor.swatch) {
+                withAnimation(.snappy(duration: 0.2)) { app.eraserOn = false }
+            }
+            SmallToolButton(systemImage: app.eraserOn ? "eraser.fill" : "eraser", help: "橡皮", selected: app.eraserOn) {
+                withAnimation(.snappy(duration: 0.2)) { app.eraserOn = true }
+            }
+            Rectangle().fill(Theme.hairline).frame(width: 1, height: 18).padding(.horizontal, 3)
+            SmallToolButton(systemImage: "trash", help: "清空", selected: false) { confirmClear = true }
+                .disabled(!(app.hasInk || !app.functions.isEmpty || !app.geometries.isEmpty || !app.shapes.isEmpty))
+                .confirmationDialog("清空整页？", isPresented: $confirmClear, titleVisibility: .visible) {
+                    Button("清空", role: .destructive) { app.clear() }
+                } message: {
+                    Text("笔迹、式子和卡片都会去掉，回放从第一行重新数。")
+                }
+            moreMenu
+        }
+        .padding(.horizontal, 4)
+        .frame(height: 40)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.hairline))
+        .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
+    }
+
+    /// 设置键：收进去的那些（草稿列表、撤销重做、完成一段、颜色粗细）都在这个菜单里。
+    private var moreMenu: some View {
+        Menu {
+            Section(shortTitle) {
+                Button(action: onBack) { Label("草稿列表", systemImage: "square.grid.2x2") }
+                if let onRename {
+                    Button(action: onRename) { Label("重命名", systemImage: "pencil") }
+                }
+            }
+            Section {
+                Button { app.undo() } label: { Label("撤销", systemImage: "arrow.uturn.backward") }
+                    .disabled(!app.canUndo)
+                Button { app.redo() } label: { Label("重做", systemImage: "arrow.uturn.forward") }
+                    .disabled(!app.canRedo)
+                Button { app.confirmLatestSegment() } label: { Label("完成一段", systemImage: "hand.tap") }
+                    .disabled(!app.hasInk)
+            }
+            Section {
+                Picker(selection: Binding(get: { app.penColor }, set: { app.penColor = $0; app.eraserOn = false })) {
+                    ForEach(PenColor.allCases) { Text($0.name).tag($0) }
+                } label: {
+                    Label("笔的颜色", systemImage: "paintpalette")
+                }
+                .pickerStyle(.menu)
+                Picker(selection: Binding(get: { app.penWidth }, set: { app.penWidth = $0; app.eraserOn = false })) {
+                    ForEach(PenWidth.allCases) { Text($0.name).tag($0) }
+                } label: {
+                    Label("笔的粗细", systemImage: "lineweight")
+                }
+                .pickerStyle(.menu)
+            }
+            Section("识别引擎：\(engine)") {
+                Button(action: onSettings) { Label("设置…", systemImage: "gearshape") }
+            }
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 14, weight: .semibold))
+                .frame(width: 34, height: 32)
+                .contentShape(Rectangle())
+        }
+        .menuOrder(.fixed)
+        .foregroundStyle(Color.primary)
+        .accessibilityLabel("设置和更多")
     }
 
     // MARK: 草稿
@@ -44,11 +130,9 @@ struct TopBar: View {
                 onRename?()
             } label: {
                 HStack(spacing: 4) {
-                    Text(title)
+                    Text(shortTitle)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
-                        .frame(maxWidth: 170, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
                     if onRename != nil {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 9, weight: .bold))
@@ -205,6 +289,36 @@ private struct ToolButton: View {
         .buttonStyle(.plain)
         .hoverEffect(.highlight)
         .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// 窗口化时的小按键：只有图标，选中时一块淡淡的底色；笔的右下角一个小圆点是现在的颜色。
+private struct SmallToolButton: View {
+    var systemImage: String
+    var help: String
+    var selected: Bool
+    var dot: Color?
+    var action: () -> Void
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(selected ? Theme.accent : enabled ? Color.primary : Color.secondary.opacity(0.4))
+                .frame(width: 34, height: 32)
+                .background(selected ? Theme.accent.opacity(0.13) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(alignment: .bottomTrailing) {
+                    if let dot {
+                        Circle().fill(dot).frame(width: 6, height: 6).padding(5)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverEffect(.highlight)
+        .accessibilityLabel(help)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

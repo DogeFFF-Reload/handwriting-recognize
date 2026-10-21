@@ -40,8 +40,13 @@ final class AppModel {
     private(set) var canRedo = false
     /// 屏幕上看得见的那块纸的大小（BoardScreen 量好了告诉这里）。
     var boardSize: CGSize = CGSize(width: 1180, height: 820)
-    /// 顶上工具栏占掉的高度（状态栏 24 + 上边距 8 + 胶囊 52 + 留白），卡片和菜单不往那里放。
-    let topInset: CGFloat = 100
+    /// 窗口化（台前调度、分屏，或者窗口比屏幕小）：工具栏只剩笔、橡皮、清空、设置四个小按键，
+    /// 笔尖旁的菜单、新卡片、操作条也都缩小，少挡纸。BoardScreen 按窗口大小设。
+    var compact = false
+    /// 顶上工具栏占掉的高度（状态栏 24 + 上边距 8 + 胶囊 52 + 留白；窗口化时胶囊小、没有状态栏），卡片和菜单不往那里放。
+    var topInset: CGFloat { compact ? 58 : 100 }
+    /// 新函数卡片的默认大小。
+    var defaultCardSize: CGSize { compact ? CGSize(width: 270, height: 196) : CGSize(width: 360, height: 252) }
     /// 纸往上滚了多少（画布坐标 = 屏幕坐标 + scrollOffset）。式子、卡片、图形都放在画布坐标里，跟着纸一起滚。
     private(set) var scrollOffset: CGPoint = .zero
     /// 纸有多长：至少三屏，写到靠近底下时自动接长。
@@ -296,7 +301,7 @@ final class AppModel {
             let frame = CGRect(origin: origin, size: size)
             let colorIndex = functions.filter { !$0.isComputed }.count
             item = FunctionItem(lineID: lineID, latex: latex, origin: origin, fontSize: fontSize, size: size,
-                                card: placeCard(next: frame, size: CGSize(width: 360, height: 252)),
+                                card: placeCard(next: frame, size: defaultCardSize),
                                 tint: Theme.curve(colorIndex))
             item.tintIndex = colorIndex
             item.revision = revision
@@ -680,7 +685,7 @@ final class AppModel {
         let frame = CGRect(origin: item.origin, size: size)
         let colorIndex = functions.filter { !$0.isComputed }.count
         let new = FunctionItem(lineID: item.lineID, latex: latex, origin: item.origin, fontSize: item.fontSize, size: size,
-                               card: placeCard(next: frame, size: CGSize(width: 360, height: 252)),
+                               card: placeCard(next: frame, size: defaultCardSize),
                                tint: Theme.curve(colorIndex))
         new.tintIndex = colorIndex
         withAnimation(.easeOut(duration: 0.2)) {
@@ -1004,6 +1009,11 @@ extension AppModel {
         }
         if name == "shapes" || name == "solids" {
             loadShapesDemo(solids: name == "solids")
+            return
+        }
+        // 窗口化的样子（BoardScreen 按 -demo compact 强制成小号工具栏）
+        if name == "compact" {
+            loadDemo("reveal")
             return
         }
         // 卡片右上角的小眼睛关上：只剩函数图像和坐标轴

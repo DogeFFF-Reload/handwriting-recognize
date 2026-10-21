@@ -121,22 +121,26 @@ private struct BoardTile: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                Theme.paper
-                if let thumbnail {
-                    Image(uiImage: thumbnail)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .clipped()
-                } else {
-                    RuledPaper()
-                    Image(systemName: "scribble")
-                        .font(.system(size: 34, weight: .light))
-                        .foregroundStyle(.tertiary)
+            // 先定好 4:3 的框（宽度跟着格子），缩略图放在 overlay 里裁切，不会把格子撑宽
+            Rectangle()
+                .fill(Theme.paper)
+                .aspectRatio(4 / 3, contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .top) {
+                    if let thumbnail {
+                        Image(uiImage: thumbnail)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        ZStack {
+                            RuledPaper()
+                            Image(systemName: "scribble")
+                                .font(.system(size: 34, weight: .light))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
                 }
-            }
-            .aspectRatio(4 / 3, contentMode: .fit)
+                .clipped()
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.hairline))
             .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
@@ -196,9 +200,11 @@ private struct NewBoardTile: View {
                         .foregroundStyle(Theme.accent)
                     }
                     .aspectRatio(4 / 3, contentMode: .fit)
+                    .frame(maxWidth: .infinity)
                 Text(" ").font(.headline)
                 Text(" ").font(.caption)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(.plain)
         .hoverEffect(.lift)
