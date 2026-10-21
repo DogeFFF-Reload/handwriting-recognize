@@ -92,15 +92,16 @@ public enum ShapeRecognizer {
             }
         }
 
-        // 不封闭：在拐点处断开，直的是线段，弯的是弧
-        let cs = corners(r, closed: false)
+        // 不封闭：在拐点处断开，直的是线段，弯的是弧。两头 8% 以内的「拐点」是起笔、收笔的小钩，不算
+        let margin = max(2, Int(Double(r.count) * 0.08))
+        let cs = corners(r, closed: false).filter { $0 >= margin && $0 <= r.count - 1 - margin }
         let cuts = [0] + cs + [r.count - 1]
         var out: [Prim] = []
         for (i, j) in zip(cuts, cuts.dropFirst()) where j > i {
             let piece = Array(r[i...j])
             let chord = Geo.dist(piece.first!, piece.last!)
             guard chord > 3 || pathLength(piece) > 6 else { continue }
-            if pathLength(piece) <= 0 || chord / pathLength(piece) >= 0.93 {
+            if isStraight(piece) {
                 let (a, b) = fitLine(piece)
                 out.append(.line(a, b))
             } else {
@@ -109,12 +110,33 @@ public enum ShapeRecognizer {
                 out.append(arc)
             }
         }
+        // 相邻两段直线几乎在一条线上（手抖出来的假拐点）：并回一条
+        var k = 1
+        while k < out.count {
+            let p = out[k - 1], q = out[k]
+            if p.kind == .line, q.kind == .line, Geo.directionGap(p.a, p.b, q.a, q.b) < 12 {
+                out[k - 1] = .line(p.a, q.b)
+                out.remove(at: k)
+            } else {
+                k += 1
+            }
+        }
         // 断成好几段、大半是弯的：是乱涂，不是图形（一笔画的 U 形圆柱侧面只有三段）
         if out.count >= 4 {
             let curvy = out.filter { $0.kind == .arc }.map { pathLength($0.points) }.reduce(0, +)
             if curvy > 0.35 * length { return [] }
         }
         return out
+    }
+
+    /// 直的：弦长和弧长差不多，而且中间鼓出来不超过弦长的 6%（扁的半个椭圆弦长比也能到 0.9 以上）。
+    static func isStraight(_ piece: [CGPoint]) -> Bool {
+        let len = pathLength(piece)
+        guard len > 0, let a = piece.first, let b = piece.last else { return true }
+        let chord = Geo.dist(a, b)
+        guard chord / len >= 0.93 else { return false }
+        let bulge = piece.map { GeometrySketchRecognizer.pointLineDistance($0, a, b) }.max() ?? 0
+        return bulge <= max(4, 0.06 * chord)
     }
 
     /// 封闭的一笔：多边形或椭圆。
@@ -176,7 +198,9 @@ public enum ShapeRecognizer {
     /// 拐点：前后各取约 5% 弧长，方向转过 29° 以上、是附近转得最多的点，而且转角集中（尖的）。
     static func corners(_ r: [CGPoint], closed: Bool) -> [Int] {
         let n = r.count
-        let w = max(2, Int((Double(n) * 0.05).rounded()))
+        // 窗口至少 8 pt：一两 pt 的手抖不会被当成拐弯
+        let step = max(n > 1 ? Geo.dist(r[0], r[1]) : 1, 0.5)
+        let w = max(2, Int((Double(n) * 0.05).rounded()), Int((8 / step).rounded(.up)))
         guard n > 2 * w + 1 else { return [] }
         func at(_ i: Int) -> CGPoint { r[(i % n + n) % n] }
         var turn = [Double](repeating: 0, count: n)

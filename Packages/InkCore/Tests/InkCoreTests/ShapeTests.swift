@@ -207,6 +207,40 @@ final class ShapeRecognizerTests: XCTestCase {
         XCTAssertEqual(sin(c.pitch), 0.3, accuracy: 0.08)
     }
 
+    /// 演示里那几张草图，换 30 种手抖都要认得出（扁的半个椭圆不能被当成直线）。
+    func testSolidsAcrossManyHands() throws {
+        for k in 1...30 {
+            seed = UInt64(k) * 7919
+            let top = CGPoint(x: 640, y: 290), bottom = CGPoint(x: 640, y: 520)
+            let cyl = [s(arc(top, 105, 32)), s(line(CGPoint(x: 535, y: 292), CGPoint(x: 536, y: 518))),
+                       s(line(CGPoint(x: 745, y: 290), CGPoint(x: 744, y: 521))), s(arc(bottom, 105, 32, from: 0, to: CGFloat.pi))]
+            XCTAssertEqual(solidKind(cyl), .cylinder, "hand \(k)")
+            let base = CGPoint(x: 1040, y: 520), apex = CGPoint(x: 1042, y: 270)
+            let cone = [s(arc(base, 110, 34)), s(line(apex, CGPoint(x: 930, y: 520))), s(line(apex, CGPoint(x: 1150, y: 520)))]
+            XCTAssertEqual(solidKind(cone), .cone, "hand \(k)")
+            let f = [CGPoint(x: 140, y: 340), CGPoint(x: 310, y: 340), CGPoint(x: 310, y: 510), CGPoint(x: 140, y: 510)]
+            let back = f.map { CGPoint(x: $0.x + 80, y: $0.y - 70) }
+            let cube = [s(path(f)), s(path(back))] + (0..<4).map { s(line(f[$0], back[$0])) }
+            XCTAssertEqual(solidKind(cube), .cube, "hand \(k)")
+            // 平面图形也一样
+            let c = CGPoint(x: 400, y: 400)
+            let sq = [CGPoint(x: 300, y: 300), CGPoint(x: 500, y: 302), CGPoint(x: 498, y: 500), CGPoint(x: 302, y: 498)]
+            XCTAssertEqual(recognize([s(path(sq), amp: 2.5)]).first?.name, "正方形", "hand \(k)")
+            XCTAssertEqual(recognize([s(arc(c, 90, 88), amp: 2.5)]).first?.name, "圆", "hand \(k)")
+            XCTAssertEqual(recognize([s(arc(c, 150, 70, angle: 0.3), amp: 2.5)]).first?.name, "椭圆", "hand \(k)")
+            let rect = [CGPoint(x: 100, y: 100), CGPoint(x: 420, y: 100), CGPoint(x: 420, y: 260), CGPoint(x: 100, y: 260)]
+            XCTAssertEqual(recognize((0..<4).map { s(line(rect[$0], rect[($0 + 1) % 4]), amp: 2.5) }).first?.name, "矩形", "hand \(k)")
+            let tri = [CGPoint(x: 220, y: 90), CGPoint(x: 80, y: 330), CGPoint(x: 400, y: 300)]
+            XCTAssertEqual(recognize([s(path(tri), amp: 2.5)]).first?.name.hasSuffix("三角形"), true, "hand \(k)")
+        }
+    }
+
+    private func solidKind(_ strokes: [InkStroke]) -> Solid3.Kind? {
+        let figs = recognize(strokes)
+        guard figs.count == 1, case .solid(let s) = figs[0] else { return nil }
+        return s.kind
+    }
+
     func testCone() throws {
         let base = CGPoint(x: 300, y: 400), apex = CGPoint(x: 302, y: 120)
         let strokes = [s(arc(base, 110, 32)), s(line(apex, CGPoint(x: 190, y: 400))), s(line(apex, CGPoint(x: 410, y: 400)))]

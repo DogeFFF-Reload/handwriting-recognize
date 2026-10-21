@@ -231,7 +231,7 @@ struct ShapeInfoBar: View {
                 }
                 .foregroundStyle(Color.primary)
             }
-            ShapeBarIcon(systemImage: item.showsLabels ? "textformat.abc" : "textformat.abc.dottedunderline",
+            ShapeBarIcon(systemImage: item.showsLabels ? "tag" : "tag.slash",
                          help: item.showsLabels ? "隐藏标注" : "显示标注") {
                 item.showsLabels.toggle()
             }
